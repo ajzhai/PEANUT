@@ -20,8 +20,6 @@ from detectron2.utils.visualizer import ColorMode, Visualizer
 from detectron2.engine import DefaultPredictor
 import detectron2.data.transforms as T
 
-from constants import hm3d_to_ade, coco_to_hm3d, coco_categories_mapping
-
 
 def debug_tensor(label, tensor):
     print(label, tensor.size(), tensor.mean().item(), tensor.std().item())
@@ -32,8 +30,8 @@ class SemanticPredMaskRCNN():
     def __init__(self, args):
         cfg = get_cfg()
         cfg.merge_from_file('nav/agent/utils/COCO-InstSeg/mask_rcnn_R_101_cat9.yaml')
-        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = min(args.sem_pred_prob_thr, args.tv_thr)
-        cfg.MODEL.WEIGHTS = 'nav/agent/utils/mask_rcnn_R_101_cat9.pth'
+        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.sem_pred_prob_thr
+        cfg.MODEL.WEIGHTS = args.seg_model_wts
         cfg.MODEL.DEVICE = args.sem_gpu_id
         #cfg.TEST.AUG.MIN_SIZES = [640, 800]
         

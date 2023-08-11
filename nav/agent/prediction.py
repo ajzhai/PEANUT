@@ -27,9 +27,7 @@ def sigmoid(x):
 class MapFromArray(object):
     """
     Process semantic maps from numpy array.
-    Required keys are "full_map". Added or updated keys are "filename", "img", "img_shape",
-    "ori_shape" (same as `img_shape`), "pad_shape" (same as `img_shape`),
-    "scale_factor" (1.0) and "img_norm_cfg" (means=0 and stds=1).
+    Required keys are "full_map". 
     """
 
     def __init__(self,
@@ -42,7 +40,8 @@ class MapFromArray(object):
         self.imdecode_backend = imdecode_backend
 
     def __call__(self, results):
-        """Call functions to load image and get image meta information.
+        """
+        Call functions to load image and get image meta information.
         Args:
             results (dict): Result dict from :obj:`mmseg.CustomDataset`.
         Returns:
@@ -110,14 +109,14 @@ class MyLoss(nn.Module):
         return 'loss_bce'
 
     
-def inference_smp(model, full_map):
-    """Inference image(s) with the segmentor.
+def run_inference(model, full_map):
+    """
+    Prediction model inference.
     Args:
         model (nn.Module): The loaded segmentor.
-        imgs (str/ndarray or list[str/ndarray]): Either image files or loaded
-            images.
+        full_map (ndarray): Input partial map.
     Returns:
-        (list[Tensor]): The segmentation result.
+        (ndarray): The prediction result.
     """
     cfg = model.cfg
     device = next(model.parameters()).device  # model device
@@ -155,7 +154,7 @@ class PEANUT_Prediction_Model():
         
     def get_prediction(self, full_map):
         
-        result = inference_smp(self.model, full_map)
+        result = run_inference(self.model, full_map)
         return sigmoid(result[0])
     
     

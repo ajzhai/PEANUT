@@ -91,7 +91,7 @@ class Semantic_Mapping(nn.Module):
         my_zs = my_zs[(my_zs > -1) & (my_zs < 1)] * 2 + 1.6
 
         # Try to mask out low stairs
-        if torch.quantile(my_zs, 0.03) > self.args.stair_thr and torch.sum((my_zs > 0.2) & (my_zs < 0.7)) > 0.2 * len(my_zs):
+        if torch.quantile(my_zs, 0.03) > 0.2 and torch.sum((my_zs > 0.2) & (my_zs < 0.7)) > 0.2 * len(my_zs):
             below_floor = XYZ_cm_std[0, 2, :] * 2 + 1.6 < 0.7
             no_toilet = self.feat[0, 1 + 4] == 0
             XYZ_cm_std[:, :, below_floor & no_toilet] = 99999
@@ -175,10 +175,5 @@ class Semantic_Mapping(nn.Module):
         maps2 = torch.cat((maps_last.unsqueeze(1), translated.unsqueeze(1)), 1)
 
         map_pred, _ = torch.max(maps2, 1)
-        
-        if self.args.overwrite_map:
-            new_exp = translated[0][1] > 0
-            map_pred[0][:, new_exp] = translated[0][:, new_exp]
-            # map_pred[0][0][new_exp] = ( maps_last[0][0][new_exp] +  translated[0][0][new_exp]) / 2.
         
         return fp_map_pred[0], map_pred[0], pose_pred[0], current_poses[0]

@@ -13,7 +13,6 @@ from numpy import ma
 
 from agent.mapping import Semantic_Mapping
 from agent.prediction import PEANUT_Prediction_Model
-from constants import habitat_goal_label_to_similar_coco, twentyone_to_hm3d
 from arguments import get_args
 
 
@@ -82,7 +81,7 @@ class Agent_State:
 
         # Unseen Target Prediction
         self.prediction_model = PEANUT_Prediction_Model(args) if args.only_explore == 0 else None 
-        self.selem = skimage.morphology.disk(args.col_rad - args.dd_erode)
+        self.selem = skimage.morphology.disk(args.col_rad)
         self.selem_idx = np.where(skimage.morphology.disk(args.col_rad + 1) > 0)
         self.target_pred = None
         self.value = None
@@ -210,7 +209,7 @@ class Agent_State:
                           torch.from_numpy(self.origins).to(self.device).float()
 
 
-    def upd_agent_state(self,obs,infos):
+    def update_state(self, obs, infos):
         """Update agent state, including semantic map, target prediction, and long-term goal."""
 
         args = self.args
@@ -235,50 +234,16 @@ class Agent_State:
                 self.global_goals = [[min(x, int(self.local_w - 1)),
                                  min(y, int(self.local_h - 1))]
                                 for x, y in self.global_goals]
-
-        
+                
         # Activating prediction 
-        if (self.step % args.smp_step == args.smp_step - 1 or 
+        if (self.step % args.update_goal_freq == args.update_goal_freq - 1 or 
             self.step == 0 or
             self.dist_to_goal < args.goal_reached_dist) and self.step >= args.switch_step:
             
             self.update_prediction()
             self.update_global_goal()
-            
-        # ------------------------------------------------------------------
-        
-        # found_goal = 0
-        # goal_maps = np.zeros((self.local_w, self.local_h))
-
-        # goal_maps[self.global_goals[0][0], self.global_goals[0][1]] = 1
-
-        # # Update long-term goal if target object is found
-        # if self.args.only_explore == 0:
-        #     cn = self.goal_cat + 4
-        #     if self.local_map[cn, :, :].sum() != 0.:
-        #         cat_semantic_map = self.local_map[cn, :, :].cpu().numpy()
-        #         cat_semantic_scores = cat_semantic_map
-        #         cat_semantic_scores[cat_semantic_scores > 0] = 1.
-        #         temp_goal = cat_semantic_scores
-        #         if (self.goal_cat != 5):  # don't erode TV
-        #             for _ in range(self.args.goal_erode):
-        #                 temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
-        #             temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)
-                    
-        #         if self.args.erode_recover:
-        #             if temp_goal.sum() == 0. and self.goal_cat != 0:
-        #                 temp_goal = cat_semantic_scores
-        #         if args.num_sem_categories <= 16:
-        #             if self.args.inhib_mode == 2: # full
-        #                 temp_goal *= (torch.sum(self.local_map[4:10], dim=0) - self.local_map[cn]).cpu().numpy() == 0
-        #         else:
-        #             if self.args.inhib_mode == 2: # full
-        #                 temp_goal *= (torch.sum(self.local_map[4:-1], dim=0) - self.local_map[cn]).cpu().numpy() == 0
-        #         if temp_goal.sum() != 0.:
-        #             goal_maps = temp_goal
-        #             found_goal = 1
+       
         self.update_goal_map()
-                    
                     
         # ------------------------------------------------------------------
         # Assemble planner inputs
@@ -473,15 +438,7 @@ class Agent_State:
                         temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
                     temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)
                     
-                if self.args.erode_recover:
-                    if temp_goal.sum() == 0. and self.goal_cat != 0:
-                        temp_goal = cat_semantic_scores
-                if args.num_sem_categories <= 16:
-                    if self.args.inhib_mode == 2: # full
-                        temp_goal *= (torch.sum(self.local_map[4:10], dim=0) - self.local_map[cn]).cpu().numpy() == 0
-                else:
-                    if self.args.inhib_mode == 2: # full
-                        temp_goal *= (torch.sum(self.local_map[4:-1], dim=0) - self.local_map[cn]).cpu().numpy() == 0
+                temp_goal *= (torch.sum(self.local_map[4:10], dim=0) - self.local_map[cn]).cpu().numpy() == 0
 
                 if temp_goal.sum() != 0.:
                     self.goal_map = temp_goal

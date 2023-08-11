@@ -24,16 +24,14 @@ from mmseg.models import build_segmentor
 from mmseg.apis import train_segmentor
 
 
-rn_goals = range(4, 26) #[(gi + 4) for gi in [1, 7, 9, 11, 14, 6]]
-use_rn = 0
+NUM_TARGET_CATEGORIES = 6
+
 
 @PIPELINES.register_module()
 class LoadMapFromFile(object):
-    """Load semantic maps from file.
-    Required keys are "img_prefix" and "img_info" (a dict that must contain the
-    key "filename"). Added or updated keys are "filename", "img", "img_shape",
-    "ori_shape" (same as `img_shape`), "pad_shape" (same as `img_shape`),
-    "scale_factor" (1.0) and "img_norm_cfg" (means=0 and stds=1).
+    """
+    Load semantic maps from file.
+    Requires key "img_info" (a dict that must contain the key "filename"). 
     """
 
     def __init__(self,
@@ -46,7 +44,8 @@ class LoadMapFromFile(object):
         self.imdecode_backend = imdecode_backend
 
     def __call__(self, results):
-        """Call functions to load image and get image meta information.
+        """
+        Call functions to load image and get image meta information.
         Args:
             results (dict): Result dict from :obj:`mmseg.CustomDataset`.
         Returns:
@@ -72,6 +71,7 @@ class LoadMapFromFile(object):
         results['img'] = img
         results['img_shape'] = img.shape
         results['ori_shape'] = img.shape
+        
         # Set initial values for default meta_keys
         results['pad_shape'] = img.shape
         results['scale_factor'] = 1.0
@@ -82,7 +82,9 @@ class LoadMapFromFile(object):
             to_rgb=False)
         
         mask = (img[:, :, 1] > 0)
-        goals = rn_goals if use_rn else range(4, 10)   #????????????????????????????????????????
+        goals = range(4, 4 + NUM_TARGET_CATEGORIES)  # channels of semantic map
+        
+        # Setting the "ground-truth" for prediction here
         results['gt_semantic_seg'] = (maps[-1, goals] * (1 - mask)).transpose(1, 2, 0)
         results['seg_fields'].append('gt_semantic_seg')
         return results
@@ -94,9 +96,9 @@ class LoadMapFromFile(object):
         return repr_str
     
     
-
 @DATASETS.register_module()
 class SemMapDataset(CustomDataset):
+    
     CLASSES = ['chair', 'couch', 'potted plant', 'bed', 'toilet', 'tv', 'dining-table', 'oven', 
               'sink', 'refrigerator', 'book', 'clock', 'vase', 'cup', 'bottle']
     PALETTE = np.array([
@@ -128,7 +130,8 @@ class SemMapDataset(CustomDataset):
 
     def load_annotations(self, img_dir, img_suffix, ann_dir, seg_map_suffix,
                          split):
-        """Load annotation from directory.
+        """
+        Load annotation from directory.
         Args:
             img_dir (str): Path to image directory
             img_suffix (str): Suffix of images.
@@ -148,12 +151,9 @@ class SemMapDataset(CustomDataset):
                 list_dir=False,
                 suffix=img_suffix,
                 recursive=True):
-            for t_idx in range(10):   #???????????????????????????????????????????????????????????????????????
+            for t_idx in range(10):  # use first 10 timesteps as partial map inputs
                 img_info = dict(filename=img)
                 img_info['t_idx'] = t_idx
-                # if ann_dir is not None:
-                #     seg_map = img.replace(img_suffix, seg_map_suffix)
-                #     img_info['ann'] = dict(seg_map=seg_map)
                 img_infos.append(img_info)
         
         img_infos = sorted(img_infos, key=lambda x: x['filename'])
@@ -162,27 +162,23 @@ class SemMapDataset(CustomDataset):
         return img_infos
     
     def get_ann_info(self, idx):
-        """Get annotation by index.
-        Args:
-            idx (int): Index of data.
-        Returns:
-            dict: Annotation info of specified index.
         """
-
+        Get annotation by index.
+        """
+        # We don't have separate annotation files, everything is in the map sequence
         return None
     
-
 
 @weighted_loss
 def my_loss(pred, target):
     target = torch.permute(target, (0, 3, 1, 2))
     assert pred.size() == target.size() and target.numel() > 0
-    wts = [36.64341412, 30.19407855, 106.23704066, 25.58503269, 100.4556983, 167.64383946]
-    pos_weight = 10 * torch.ones(pred[0].shape).to(pred.device) #torch.ones(6)
+    pos_weight = 10 * torch.ones(pred[0].shape).to(pred.device) 
     for i, wt in enumerate(wts):
         pos_weight[i] = wts[i]
     loss = F.binary_cross_entropy_with_logits(pred, target / 255., reduction='none', pos_weight=pos_weight)
     return loss
+
 
 @LOSSES.register_module
 class MyLoss(nn.Module):
@@ -211,7 +207,6 @@ class MyLoss(nn.Module):
         return 'loss_bce'
 
 
-
 if __name__ == '__main__':
         
     cfg = Config.fromfile('configs/pspnet/pspnet_r50-d8_512x1024_80k_cityscapes.py')
@@ -220,14 +215,13 @@ if __name__ == '__main__':
     cfg.norm_cfg = dict(type='BN', requires_grad=True)
     cfg.model.backbone.norm_cfg = cfg.norm_cfg
     cfg.model.decode_head.norm_cfg = cfg.norm_cfg
-    cfg.model.backbone.in_channels = 27 if use_rn else 14  #???????????????????????????????????????????????????????????????????????
-    cfg.model.decode_head.num_classes = 22 if use_rn else 6
+    cfg.model.backbone.in_channels = 4 + NUM_TARGET_CATEGORIES + 1
+    cfg.model.decode_head.num_classes = NUM_TARGET_CATEGORIES
     cfg.model.decode_head.loss_decode = dict(type='MyLoss', loss_weight=1.0)
     
-    cfg.model.auxiliary_head.num_classes = 22 if use_rn else 6
+    cfg.model.auxiliary_head.num_classes = NUM_TARGET_CATEGORIES
     cfg.model.auxiliary_head.loss_decode = dict(type='MyLoss', loss_weight=0.4)
     cfg.model.auxiliary_head.norm_cfg = cfg.norm_cfg
-    #cfg.model.auxiliary_head=None
 
     # Modify dataset type and path
     cfg.dataset_type = 'SemMapDataset'
@@ -239,7 +233,7 @@ if __name__ == '__main__':
     cfg.img_norm_cfg = dict(
         mean=[0, 0, 0], std=[1 ,1, 1], to_rgb=False)
 
-    orig_in_size = 960   #???????????????????????????????????????????????????????????????????????
+    orig_in_size = 960   # the map size
     in_size = orig_in_size
     cfg.crop_size = (in_size, in_size)
     cfg.train_pipeline = [
@@ -252,7 +246,6 @@ if __name__ == '__main__':
         dict(type='DefaultFormatBundle'),
         dict(type='Collect', keys=['img', 'gt_semantic_seg']),
     ]
-
 
     cfg.test_pipeline = [
         dict(type='LoadMapFromFile'),
@@ -268,27 +261,26 @@ if __name__ == '__main__':
             ])
     ]
 
-
     cfg.data.train.type = cfg.dataset_type
     cfg.data.train.data_root = cfg.data_root
-    cfg.data.train.img_dir = 'train_56' if use_rn else 'train_full' #'train_80' 
+    cfg.data.train.img_dir = 'train' 
     cfg.data.train.ann_dir = None
     cfg.data.train.pipeline = cfg.train_pipeline
 
     cfg.data.val.type = cfg.dataset_type
     cfg.data.val.data_root = cfg.data_root
-    cfg.data.val.img_dir = 'val_56' if use_rn else 'val_80'
+    cfg.data.val.img_dir = 'val'
     cfg.data.train.ann_dir = None
     cfg.data.val.pipeline = cfg.test_pipeline
 
     cfg.data.test.type = cfg.dataset_type
     cfg.data.test.data_root = cfg.data_root
-    cfg.data.test.img_dir = 'val_56' if use_rn else 'val_80'
+    cfg.data.test.img_dir = 'val'  
     cfg.data.train.ann_dir = None
     cfg.data.test.pipeline = cfg.test_pipeline
 
-    # Set up working dir to save files and logs.  #???????????????????????????????????????????????????????????????????????
-    cfg.work_dir =  './work_dirs/w10_800_t10' #'../work_dirs/smp_weighted_t10'
+    # Set up working dir to save files and logs.  
+    cfg.work_dir =  './work_dirs/final_model' 
 
     cfg.runner.max_iters = 60000
     cfg.log_config.interval = 500
@@ -297,7 +289,7 @@ if __name__ == '__main__':
     cfg.optimizer = optimizer = dict(type='Adam', lr=0.0005)
     cfg.lr_config.min_lr = 1e-5
     
-    # Set seed to facitate reproducing the result
+    # Set seed to facilitate reproducing the result
     cfg.seed = 0
     set_random_seed(0, deterministic=False)
     cfg.gpu_ids = range(1)
@@ -311,6 +303,7 @@ if __name__ == '__main__':
 
     # Build the detector
     model = build_segmentor(cfg.model)
+    
     # Add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
 

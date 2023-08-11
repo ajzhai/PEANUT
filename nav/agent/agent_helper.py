@@ -98,7 +98,7 @@ class Agent_Helper:
 
         self.edge_buffer = 10 if args.num_sem_categories <= 16 else 40
 
-        if args.visualize or args.print_images:
+        if args.visualize:
             self.legend = cv2.imread('nav/new_hm3d_legend.png')[:118]
             self.vis_image = None
             self.rgb_vis = None
@@ -127,7 +127,7 @@ class Agent_Helper:
         self.forward_after_stop = self.forward_after_stop_preset
 
 
-    def plan_act_and_preprocess(self, planner_inputs):
+    def plan_act(self, planner_inputs):
         """
         Function responsible for motion planning and visualization.
 
@@ -148,12 +148,10 @@ class Agent_Helper:
 
         self.timestep += 1
         self.goal_name = planner_inputs['goal_name']
-        if self.args.visualize or self.args.print_images:
-            self.vis_image = vu.init_vis_image(self.goal_name, self.legend)
 
         action = self._plan(planner_inputs)
 
-        if self.args.visualize or self.args.print_images:
+        if self.args.visualize:
             self._visualize(planner_inputs)
 
         action = {'action': action}
@@ -220,7 +218,7 @@ class Agent_Helper:
 
 
     def _get_sem_pred(self, rgb, depth=None):
-        if self.args.print_images == 1:
+        if self.args.visualize:
             self.rgb_vis = rgb[:, :, ::-1]
 
         sem_pred, sem_vis = self.seg_model.get_prediction(rgb, depth, goal_cat=self.goal_cat)
@@ -429,7 +427,7 @@ class Agent_Helper:
         # Smalller radius for toilet
         is_toilet = self.info['goal_name'] == 'toilet'
         if is_toilet:
-            selem = skimage.morphology.disk(self.args.toiletrad if self.found_goal == 1 else 2)
+            selem = skimage.morphology.disk(6 if self.found_goal == 1 else 2)
 
         goal = skimage.morphology.binary_dilation(
             goal, selem) != True
@@ -478,7 +476,7 @@ class Agent_Helper:
 
             while distance > 100:
                 step += 1
-                if step > 8 or (is_toilet and step > 2 and not self.args.toiletgrow):
+                if step > 8 or (is_toilet and step > 2):
                     break
                 selem = skimage.morphology.disk(radius)
                 goal = skimage.morphology.binary_dilation(
@@ -609,19 +607,17 @@ class Agent_Helper:
                  int(color_palette[9] * 255))
         cv2.drawContours(self.vis_image, [agent_arrow], 0, color, -1) 
         
-        if args.visualize:
+        if args.visualize == 1:
             # Displaying the image
             cv2.imshow("Thread {}".format(self.rank), self.vis_image)
             cv2.waitKey(1)
 
-        if args.print_images:
+        elif args.visualize == 2:
+            # Saving the image
             fn = '{}/episodes/thread_{}/eps_{}/{}-{}-Vis-{}.jpg'.format(
                 dump_dir, self.rank, self.episode_no - 1,
                 self.rank, self.episode_no - 1, self.timestep)
 
             cv2.imwrite(fn, self.vis_image, [cv2.IMWRITE_JPEG_QUALITY, 100])
-            fn2 = '{}/episodes/thread_{}/eps_{}/{}-{}-Vis-{}.jpg'.format(
-                dump_dir, self.rank+1, self.episode_no,
-                self.rank, self.episode_no, self.timestep)
 
 

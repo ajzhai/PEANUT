@@ -6,11 +6,10 @@ import torch
 from arguments import get_args
 import numpy as np
 import agent.utils.pose as pu
-from constants import coco_categories, hab2coco, hab2name, habitat_labels_r, habitat_goal_label_to_similar_coco, hm3d_names, hm3d_to_coco, hm3d_to_21
+from constants import hm3d_names, hm3d_to_coco
 import copy
 from agent.agent_state import Agent_State
 from agent.agent_helper import Agent_Helper
-
 
 
 class PEANUT_Agent(habitat.Agent):
@@ -63,8 +62,8 @@ class PEANUT_Agent(habitat.Agent):
             self.first_obs = False
 
         # Update state and plan action
-        planner_inputs = self.agent_states.upd_agent_state(obs, info)
-        action = self.agent_helper.plan_act_and_preprocess(planner_inputs)
+        planner_inputs = self.agent_states.update_state(obs, info)
+        action = self.agent_helper.plan_act(planner_inputs)
         
         return action
 

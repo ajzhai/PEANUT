@@ -6,7 +6,7 @@ import torch
 from arguments import get_args
 import numpy as np
 
-from agent.smp_agent import SMPAgent
+from agent.peanut_agent import PEANUT_Agent
 
 from habitat.core.logging import logger
 
@@ -16,7 +16,7 @@ def main():
     args_2.sem_gpu_id = 0
     config_paths = os.environ["CHALLENGE_CONFIG_FILE"]
     config = habitat.get_config(config_paths)
-    nav_agent = SMPAgent(args=args_2,task_config=config)
+    nav_agent = PEANUT_Agent(args=args_2,task_config=config)
     if args_2.evaluation == "local":
         challenge = habitat.Challenge(eval_remote=False)
     else:
