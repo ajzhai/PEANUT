@@ -1,3 +1,6 @@
+### Note
+This is a custom clone of MMSegmentation used for PEANUT's prediction model.
+
 <div align="center">
   <img src="resources/mmseg-logo.png" width="600"/>
   <div>&nbsp;</div>
