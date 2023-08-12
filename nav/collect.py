@@ -54,7 +54,7 @@ def main():
 
             step_i = 0
             seq_i = 0
-            # full_map_seq = np.zeros((len(save_steps), 4 + args.num_sem_categories, nav_agent.agent_states.full_w, nav_agent.agent_states.full_h), dtype=np.uint8)
+            
             while not hab_env.episode_over:
                 action = nav_agent.act(observations)
                 observations = hab_env.step(action)
@@ -82,8 +82,6 @@ def main():
                 print('-' * 40)
                 sys.stdout.flush()
                 
-            # np.savez_compressed('./data/saved_maps/train_rn/f%05d.npz' % count_episodes, maps=full_map_seq)
-
         ep_i += 1
         
 

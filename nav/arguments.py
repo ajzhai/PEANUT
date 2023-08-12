@@ -100,7 +100,7 @@ def get_args():
                         help="Distance at which goal is considered reached")
     parser.add_argument('--update_goal_freq', type = float, default = 10,
                         help="How often to update long-term goal")
-    parser.add_argument('--switch_step', type = float, default = 19,
+    parser.add_argument('--switch_step', type = float, default = 0,
                         help="For switching from Stubborn goal selection to PEANUT")
     
     # For data collection 
