@@ -210,7 +210,7 @@ class Agent_Helper:
         depth[mask2] = 0.
 
         mask1 = depth == 0
-        depth[mask1] = 9999. 
+        depth[mask1] = 100.0 
 
         # Convert to cm 
         depth = min_d * 100.0 + depth * (max_d - min_d) * 100.0

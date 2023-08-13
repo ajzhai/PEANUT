@@ -91,7 +91,7 @@ class Semantic_Mapping(nn.Module):
         my_zs = my_zs[(my_zs > -1) & (my_zs < 1)] * 2 + 1.6
 
         # Try to mask out low stairs
-        if torch.quantile(my_zs, 0.03) > 0.2 and torch.sum((my_zs > 0.2) & (my_zs < 0.7)) > 0.2 * len(my_zs):
+        if len(my_zs) > 0 and torch.quantile(my_zs, 0.03) > 0.2 and torch.sum((my_zs > 0.2) & (my_zs < 0.7)) > 0.2 * len(my_zs):
             below_floor = XYZ_cm_std[0, 2, :] * 2 + 1.6 < 0.7
             no_toilet = self.feat[0, 1 + 4] == 0
             XYZ_cm_std[:, :, below_floor & no_toilet] = 99999
