@@ -139,7 +139,7 @@ class Agent_State:
         p_input['goal'] = self.goal_maps  # global_goals[e]
         p_input['new_goal'] = 1
         p_input['found_goal'] = 0
-        if self.args.visualize or self.args.print_images:
+        if self.args.visualize:
             vlm = torch.clone(self.local_map[4:, :, :])
             vlm[-1] = 1e-5
             p_input['sem_map_pred'] = vlm.argmax(0).cpu().numpy()
@@ -255,7 +255,7 @@ class Agent_State:
         p_input['found_goal'] = self.found_goal
         p_input['goal_name'] = infos['goal_name']
 
-        if args.visualize or args.print_images:
+        if args.visualize:
             vlm = torch.clone(self.local_map[4:, :, :])
             vlm[-1] = 1e-5
             p_input['sem_map_pred'] = vlm.argmax(0).cpu().numpy()
