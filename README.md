@@ -52,10 +52,17 @@ to build and run everything in Docker. Note: depending on how Docker is setup on
 An example script for evaluating ObjectNav performance is provided in `nav/collect.py`. This script is a good entry point for understanding the code and it is what `nav_exp.sh` runs by default. See `nav/arguments.py` for available command-line arguments.
 
 ### Collecting semantic maps
-An example script for collecting semantic maps and saving them as .npz files is provided in `nav/collect_maps.py`. A link to download the original map dataset used in the paper is coming soon.
+An example script for collecting semantic maps and saving them as .npz files is provided in `nav/collect_maps.py`. A link to download the original map dataset used in the paper is provided below.
 
 ### Training the prediction model
 We use MMSegmentation to train and run PEANUT's prediction model. A custom clone of MMSegmentation is contained in `prediction/`, and a training script is provided in `prediction/train_prediction_model.py`. Please see the MMSegmentation docs in the `prediction/` folder for more info about how to use MMSegmentation.
+
+
+## Semantic Map Dataset
+The original map dataset used in the paper can be downloaded from [this Google Drive link](https://drive.google.com/file/d/134omZAAu_zYUaOYuNQcDMPhZCdxV0zbZ/view?usp=sharing). 
+
+It contains sequences of semantic maps from 5000 episodes (4000 train, 1000 val) of [Stubborn](https://github.com/Improbable-AI/Stubborn)-based exploration  in HM3D. This dataset can be directly used to train a target prediction model using `prediction/train_prediction_model.py`.
+
 
 ## Citation
 
