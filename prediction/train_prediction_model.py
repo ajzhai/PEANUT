@@ -25,6 +25,7 @@ from mmseg.apis import train_segmentor
 
 
 NUM_TARGET_CATEGORIES = 6
+NUM_EXTRA_CATEGORIES = 3
 
 
 @PIPELINES.register_module()
@@ -173,10 +174,13 @@ class SemMapDataset(CustomDataset):
 def my_loss(pred, target):
     target = torch.permute(target, (0, 3, 1, 2))
     assert pred.size() == target.size() and target.numel() > 0
-    pos_weight = 10 * torch.ones(pred[0].shape).to(pred.device) 
+    wts = [36.64341412, 30.19407855, 106.23704066, 25.58503269, 100.4556983, 167.64383946]  # inverse frequency
+    pos_weight = torch.ones(pred[0].shape).to(pred.device) 
     for i, wt in enumerate(wts):
         pos_weight[i] = wts[i]
-    loss = F.binary_cross_entropy_with_logits(pred, target / 255., reduction='none', pos_weight=pos_weight)
+
+    loss = F.binary_cross_entropy_with_logits(pred, target / 255., reduction='none')  # no weighting
+    # loss = F.binary_cross_entropy_with_logits(pred, target / 255., reduction='none', pos_weight=pos_weight)
     return loss
 
 
@@ -215,7 +219,7 @@ if __name__ == '__main__':
     cfg.norm_cfg = dict(type='BN', requires_grad=True)
     cfg.model.backbone.norm_cfg = cfg.norm_cfg
     cfg.model.decode_head.norm_cfg = cfg.norm_cfg
-    cfg.model.backbone.in_channels = 4 + NUM_TARGET_CATEGORIES + 1
+    cfg.model.backbone.in_channels = 4 + NUM_TARGET_CATEGORIES + NUM_EXTRA_CATEGORIES + 1
     cfg.model.decode_head.num_classes = NUM_TARGET_CATEGORIES
     cfg.model.decode_head.loss_decode = dict(type='MyLoss', loss_weight=1.0)
     
@@ -280,7 +284,7 @@ if __name__ == '__main__':
     cfg.data.test.pipeline = cfg.test_pipeline
 
     # Set up working dir to save files and logs.  
-    cfg.work_dir =  './work_dirs/final_model' 
+    cfg.work_dir =  '../data/work_dirs/final_model' 
 
     cfg.runner.max_iters = 60000
     cfg.log_config.interval = 500
