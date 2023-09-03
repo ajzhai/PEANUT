@@ -19,7 +19,10 @@ from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.utils.visualizer import ColorMode, Visualizer
 from detectron2.engine import DefaultPredictor
 import detectron2.data.transforms as T
+from transformers import SegformerFeatureExtractor, SegformerForSemanticSegmentation
+from PIL import Image
 
+import pdb
 
 def debug_tensor(label, tensor):
     print(label, tensor.size(), tensor.mean().item(), tensor.std().item())
@@ -42,8 +45,9 @@ class SemanticPredMaskRCNN():
 
     def get_prediction(self, img, depth=None, goal_cat=None):
         args = self.args
-    
+        # pdb.set_trace()
         img = img[:, :, ::-1]
+        
         pred_instances = self.predictor(img)["instances"]
         
         semantic_input = torch.zeros(img.shape[0], img.shape[1], self.n_cats + 1, device=args.sem_gpu_id)
@@ -69,3 +73,95 @@ def compress_sem_map(sem_map):
     for i in range(sem_map.shape[0]):
         c_map[sem_map[i] > 0.] = i + 1
     return c_map
+
+
+class SegformerSegmenter():
+    def __init__(self,args):
+        self.segmenter = FineTunedTSegmenter(model_ckpt = args.segformer_ckpt)
+        self.args = args
+    def get_prediction(self, img, depth=None, goal_cat=None):
+        args = self.args
+        seg_out = self.segmenter.get_pred_probs(img)
+        img = img[:,:,::-1]
+        return seg_out,img
+    
+class FineTunedTSegmenter():
+    def __init__(self,temperature = 1,model_ckpt = "./best_model"):
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        self.feature_extractor = SegformerFeatureExtractor.from_pretrained("nvidia/segformer-b4-finetuned-ade-512-512")
+        self.model = SegformerForSemanticSegmentation.from_pretrained(model_ckpt).to(self.device)
+        self.model.eval()
+        self.temperature = temperature
+        
+        self.softmax = nn.Softmax(dim = 1)
+
+        # for idx,new_class in enumerate(self.class_mapping):
+        #     class_matrix[idx,new_class] = 1
+
+        # self.cm = torch.from_numpy(class_matrix.astype(np.float32)).to(self.device)
+    def set_temperature(self,temperature):
+        self.temperature = temperature
+        
+    def classify(self,rgb,depth = None,x=None,y = None,temperature = None):
+        with torch.no_grad():
+            image = Image.fromarray(np.uint8(rgb))
+            inputs = self.feature_extractor(images=image, return_tensors="pt")
+            outputs = self.model(pixel_values=inputs['pixel_values'].to(self.device))
+            logits = outputs.logits
+
+
+            # pred = torch.tensordot(logits,self.cm,dims = ([0],[0])).permute((2,0,1)).unsqueeze(0)
+            if((x == None) or( y == None)):
+                pred = F.interpolate(logits, (image.height,image.width),mode='bilinear')
+            else:
+                pred = F.interpolate(logits, (x,y),mode='bilinear')
+
+            if(temperature):
+                # print('applying temperature scaling')
+                pred = self.softmax(pred/temperature)
+            else:
+                pred = self.softmax(pred/self.temperature)
+
+            pred = torch.argmax(pred,axis = 1)
+
+        return pred.squeeze().detach().cpu().numpy()
+
+    def get_pred_probs(self,rgb,depth = None,x = None,y = None,temperature = None):
+        with torch.no_grad():
+            image = Image.fromarray(np.uint8(rgb))
+            inputs = self.feature_extractor(images=image, return_tensors="pt")
+            # print(inputs['pixel_values'].shape)
+            outputs = self.model(pixel_values=inputs['pixel_values'].to(self.device))
+            logits = outputs.logits
+            # print(logits.shape)
+            # pred = torch.tensordot(logits,self.cm,dims = ([0],[0])).permute((2,0,1)).unsqueeze(0)
+            # pred = self.aggregate_logits(logits)
+            pred = logits
+            # print(pred.shape)
+            # pred = logits.unsqueeze(0)
+            
+            if(temperature):
+                # print('applying temperature scaling')
+                pred = self.softmax(pred/temperature)
+            else:
+                pred = self.softmax(pred/self.temperature)
+            if((x == None) or( y == None)):
+                pred = F.interpolate(pred, (image.height,image.width),mode='nearest')
+            else:
+                pred = F.interpolate(pred, (x,y),mode='nearest')
+        
+        return pred.squeeze().detach().permute((1,2,0)).contiguous().cpu().numpy()
+
+
+    def get_raw_logits(self,rgb,depth = None,x=None,y = None,temperature = 1):
+        with torch.no_grad():
+            image = Image.fromarray(np.uint8(rgb))
+            inputs = self.feature_extractor(images=image, return_tensors="pt")
+            # print(inputs['pixel_values'].shape)
+            outputs = self.model(pixel_values=inputs['pixel_values'].to(self.device))
+            logits = outputs.logits
+            if((x == None) or( y == None)):
+                pred = F.interpolate(logits, (image.height,image.width),mode='nearest')
+            else:
+                pred = F.interpolate(logits, (x,y),mode='nearest')
+        return pred.squeeze().detach().permute((1,2,0)).contiguous().cpu().numpy()

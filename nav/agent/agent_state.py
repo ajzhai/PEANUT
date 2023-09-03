@@ -10,11 +10,12 @@ import numpy as np
 import skfmm
 import skimage.morphology
 from numpy import ma
-
+import pdb
 from agent.mapping import Semantic_Mapping
 from agent.prediction import PEANUT_Prediction_Model
 from arguments import get_args
-
+from reconstruction import NaiveAveragingReconstruction,PeanutMapper
+import open3d as o3d
 
 def add_boundary(mat, value=1):
     h, w = mat.shape
@@ -218,7 +219,8 @@ class Agent_State:
         self.poses = torch.from_numpy(np.asarray(
             infos['sensor_pose'] )
         ).float().to(self.device)
-        
+        # pdb.set_trace()
+        # print(self.poses)
         self.update_local_map(obs)
 
         if self.l_step == args.num_local_steps - 1:
@@ -271,7 +273,7 @@ class Agent_State:
 
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
-        
+        # pdb.set_trace()
         locs = self.local_pose.cpu().numpy()
         self.planner_pose_inputs[:3] = locs + self.origins
         self.local_map[2, :, :].fill_(0.)  # Resetting current location channel
@@ -297,11 +299,12 @@ class Agent_State:
 
         self.loc_r = loc_r
         self.loc_c = loc_c
+        # print(self.local_map.shape,self.full_map.shape)
 
 
     def update_full_map(self):
         """Update the agent's full (global) map."""
-
+        print('updating_full_map')
         args = self.args 
 
         self.full_map[:, self.lmb[0]:self.lmb[1], self.lmb[2]:self.lmb[3]] = \
@@ -451,3 +454,229 @@ class Agent_State:
         self.l_step += 1
         self.step += 1
         self.l_step = self.step % args.num_local_steps
+
+class Traditional_Agent_State(Agent_State):
+
+    def __init__(self,args):
+        super(Traditional_Agent_State,self).__init__(args)
+        self.args = args
+        #declaring open3d device:
+        self.o3d_device = o3d.core.Device("CUDA:" + str(args.sem_gpu_id) if args.cuda else "CPU")
+        # print(self.o3d_device)
+        del self.sem_map_module
+        self.init_vgb()
+        # Semantic Mapping
+    def init_vgb(self):
+        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.049,device =self.o3d_device,cuda_device = self.args.device)
+        # self.sem_map_module.eval()
+
+    def init_with_obs(self, obs, infos,original_infos):
+        """Initialize from initial observation."""
+        del self.sem_map_module
+        o3d.core.cuda.release_cache()
+        self.init_vgb()
+        self.l_step = 0
+        self.step = 0
+
+        self.poses = torch.from_numpy(np.asarray(
+            infos['sensor_pose'])
+        ).float().to(self.device)
+        # _, self.local_map, _, self.local_pose = \
+        #     self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
+        # self.full_map = \
+        self.full_map = self.sem_map_module.update_and_get_map(obs,original_infos,self.full_map)
+        self.local_pose = self.get_new_pose_batch(self.local_pose[None,:],self.poses[None,:])[0]
+        self.local_map = self.full_map[:,self.lmb[0]:self.lmb[1],self.lmb[2]:self.lmb[3]]
+
+
+        # Compute Global policy input
+        self.locs = self.local_pose.cpu().numpy()
+
+        r, c = self.locs[1], self.locs[0]
+        loc_r, loc_c = [int(r * 100.0 / self.args.map_resolution),
+                        int(c * 100.0 / self.args.map_resolution)]
+
+        self.local_map[2:4, loc_r - 1:loc_r + 2, loc_c - 1:loc_c + 2] = 1.
+        
+        rgoal = [0.1, 0.1]
+        self.global_goals = [[int(rgoal[0] * self.local_w), int(rgoal[1] * self.local_h)]]
+        self.global_goals = [[min(x, int(self.local_w - 1)), min(y, int(self.local_h - 1))]
+                        for x, y in self.global_goals]
+
+        self.goal_maps = np.zeros((self.local_w, self.local_h))
+        self.goal_maps[self.global_goals[0][0], self.global_goals[0][1]] = 1
+
+
+        p_input = {}
+
+        p_input['obstacle'] = self.local_map[0, :, :].cpu().numpy()
+        p_input['exp_pred'] = self.local_map[1, :, :].cpu().numpy()
+        p_input['pose_pred'] = self.planner_pose_inputs
+        p_input['goal'] = self.goal_maps  # global_goals[e]
+        p_input['new_goal'] = 1
+        p_input['found_goal'] = 0
+        if self.args.visualize:
+            vlm = torch.clone(self.local_map[4:, :, :])
+            vlm[-1] = 1e-5
+            p_input['sem_map_pred'] = vlm.argmax(0).cpu().numpy()
+
+
+        self.planner_inputs = p_input
+
+        torch.set_grad_enabled(False)
+        self.full_map[:,self.lmb[0]:self.lmb[1],self.lmb[2]:self.lmb[3]] = self.local_map
+
+
+    def update_state(self, obs, infos,oringinal_infos):
+        """Update agent state, including semantic map, target prediction, and long-term goal."""
+
+        args = self.args
+
+        self.goal_cat = infos['goal_cat_id']
+        self.poses = torch.from_numpy(np.asarray(
+            infos['sensor_pose'] )
+        ).float().to(self.device)
+        # pdb.set_trace()
+        # print(self.poses)
+        self.update_local_map(obs,oringinal_infos)
+
+        if self.l_step == args.num_local_steps - 1:
+            self.l_step = 0
+
+            self.update_full_map()
+
+            # If we don't want to activate prediction yet
+            if self.step < args.switch_step:
+                # Set goal to corner (like Stubborn)
+                preset = self.global_goal_presets[self.global_goal_preset_id]
+                self.global_goals = [[int(preset[0] * self.local_w), int(preset[1] * self.local_h)]]
+                self.global_goals = [[min(x, int(self.local_w - 1)),
+                                 min(y, int(self.local_h - 1))]
+                                for x, y in self.global_goals]
+                
+        # Activating prediction 
+        if (self.step % args.update_goal_freq == args.update_goal_freq - 1 or 
+            self.step == 0 or
+            self.dist_to_goal < args.goal_reached_dist) and self.step >= args.switch_step:
+            
+            self.update_prediction()
+            self.update_global_goal()
+       
+        self.update_goal_map()
+                    
+        # ------------------------------------------------------------------
+        # Assemble planner inputs
+        p_input = {}
+        p_input['obstacle'] = self.local_map[0, :, :].cpu().numpy()
+        p_input['exp_pred'] = self.local_map[1, :, :].cpu().numpy()
+        p_input['pose_pred'] = self.planner_pose_inputs
+        p_input['goal'] = self.goal_map  
+        p_input['found_goal'] = self.found_goal
+        p_input['goal_name'] = infos['goal_name']
+
+        if args.visualize:
+            vlm = torch.clone(self.local_map[4:, :, :])
+            vlm[-1] = 1e-5
+            p_input['sem_map_pred'] = vlm.argmax(0).cpu().numpy()
+
+        self.inc_step()
+        return p_input
+
+    def update_local_map(self, obs,infos):
+        """Update the agent's local map."""
+
+        args = self.args
+
+        # self.local_map,self.local_pose = \
+        #     self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
+        self.full_map = self.sem_map_module.update_and_get_map(obs,infos,self.full_map)
+        self.local_pose = self.get_new_pose_batch(self.local_pose[None,:],self.poses[None,:])[0]
+        self.local_map = self.full_map[:,self.lmb[0]:self.lmb[1],self.lmb[2]:self.lmb[3]]
+        locs = self.local_pose.cpu().numpy()
+        self.planner_pose_inputs[:3] = locs + self.origins
+        self.local_map[2, :, :].fill_(0.)  # Resetting current location channel
+
+        r, c = locs[1], locs[0]
+        loc_r = int(r * 100.0 / args.map_resolution)
+        loc_c = int(c * 100.0 / args.map_resolution)
+        
+        # Recording agent trajectory
+        traj_rad = 2
+        self.local_map[2:4, loc_r - traj_rad:loc_r + traj_rad + 1, loc_c - traj_rad:loc_c + traj_rad + 1] = 1.
+
+        # Explored under the agent
+        to_fill = (self.selem_idx[0] - (args.col_rad+1) + loc_r, self.selem_idx[1] - (args.col_rad+1) + loc_c)
+        # print('before',self.local_map[1][to_fill])
+        self.local_map[1][to_fill] = 1.
+        # print('after',self.local_map[1][to_fill])
+
+        # Ensure goal is marked as explored once we get close enough
+        self.dist_to_goal = np.sqrt((loc_r - (self.global_goals[0][0]))**2 + (loc_c - (self.global_goals[0][1]))**2) * args.map_resolution
+        if self.dist_to_goal < args.goal_reached_dist:
+            to_fill = (self.selem_idx[0] - (args.col_rad+1) + self.global_goals[0][0], 
+                       self.selem_idx[1] - (args.col_rad+1) + self.global_goals[0][1])
+            self.local_map[1][to_fill] = 1.
+        # print(self.local_map.shape)
+        self.loc_r = loc_r
+        self.loc_c = loc_c
+        self.full_map[:,self.lmb[0]:self.lmb[1],self.lmb[2]:self.lmb[3]] = self.local_map
+        # pdb.set_trace()
+        # self.full_map[:,self.lmb[0]:self.lmb[1],self.lmb[2]:self.lmb[3]][1][to_fill]
+
+
+    def get_new_pose_batch(self,pose, rel_pose_change):
+
+            pose[:, 1] += rel_pose_change[:, 0] * \
+                torch.sin(pose[:, 2] / 57.29577951308232) \
+                + rel_pose_change[:, 1] * \
+                torch.cos(pose[:, 2] / 57.29577951308232)
+            pose[:, 0] += rel_pose_change[:, 0] * \
+                torch.cos(pose[:, 2] / 57.29577951308232) \
+                - rel_pose_change[:, 1] * \
+                torch.sin(pose[:, 2] / 57.29577951308232)
+            pose[:, 2] += rel_pose_change[:, 2] * 57.29577951308232
+
+            pose[:, 2] = torch.fmod(pose[:, 2] - 180.0, 360.0) + 180.0
+            pose[:, 2] = torch.fmod(pose[:, 2] + 180.0, 360.0) - 180.0
+
+            return pose
+
+
+    def update_full_map(self):
+        """Update the agent's full (global) map."""
+
+        args = self.args 
+
+        self.full_map[:, self.lmb[0]:self.lmb[1], self.lmb[2]:self.lmb[3]] = \
+                self.local_map
+        res = self.args.grid_resolution
+
+        self.full_pose = self.local_pose + \
+                            torch.from_numpy(self.origins).to(self.device).float()
+
+        locs = self.full_pose.cpu().numpy()
+        r, c = locs[1], locs[0]
+        loc_r, loc_c = [int(r * 100.0 / args.map_resolution),
+                        int(c * 100.0 / args.map_resolution)]
+
+        self.lmb = self.get_local_map_boundaries((loc_r, loc_c),
+                                                    (self.local_w, self.local_h),
+                                                    (self.full_w, self.full_h))
+
+        self.planner_pose_inputs[3:] = self.lmb
+        self.origins = np.array([self.lmb[2] * args.map_resolution / 100.0,
+                        self.lmb[0] * args.map_resolution / 100.0, 0.])
+
+        self.local_map = self.full_map[:,
+                            self.lmb[0]:self.lmb[1],
+                            self.lmb[2]:self.lmb[3]]
+        self.local_pose = self.full_pose - \
+                            torch.from_numpy(self.origins).to(self.device).float()
+
+
+        locs = self.local_pose.cpu().numpy()
+        r, c = locs[1], locs[0]
+        self.loc_r = int(r * 100.0 / args.map_resolution)
+        self.loc_c = int(c * 100.0 / args.map_resolution)
+
+                        

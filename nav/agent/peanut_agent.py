@@ -8,14 +8,19 @@ import numpy as np
 import agent.utils.pose as pu
 from constants import hm3d_names, hm3d_to_coco
 import copy
-from agent.agent_state import Agent_State
+from agent.agent_state import Agent_State,Traditional_Agent_State
 from agent.agent_helper import Agent_Helper
-
+import pdb
 
 class PEANUT_Agent(habitat.Agent):
     def __init__(self, args, task_config: habitat.Config):
         self._POSSIBLE_ACTIONS = task_config.TASK.POSSIBLE_ACTIONS
-        self.agent_states = Agent_State(args)
+        self.mapping_strategy = args.mapping_strategy
+        assert self.mapping_strategy in ['neural','traditional'],"Only valid mapping strategies are ['neural','traditional'], but {} was chosen".format(self.mapping_strategy)
+        if(self.mapping_strategy == 'neural'):
+            self.agent_states = Agent_State(args)
+        else:
+            self.agent_states = Traditional_Agent_State(args)
         self.agent_helper = Agent_Helper(args, self.agent_states)
         self.agent_states.helper = self.agent_helper
         self.last_sim_location = None
@@ -52,17 +57,28 @@ class PEANUT_Agent(habitat.Agent):
         goal = hm3d_to_coco[goal]
             
         self.agent_helper.set_goal_cat(goal)
+        original_info = np.zeros((3))
+        original_info[:2] = observations['gps']
+        original_info[2] = observations['compass']
+        # pdb.set_trace()
+
         obs, info = self.agent_helper.preprocess_inputs(observations['rgb'], observations['depth'], info)
         info['goal_cat_id'] = goal
         
         obs = obs[np.newaxis, :, :, :]
         obs = torch.from_numpy(obs).float().to(self.device)
         if self.first_obs:
-            self.agent_states.init_with_obs(obs, info)
+            if(self.mapping_strategy == 'neural'):
+                self.agent_states.init_with_obs(obs, info)
+            elif(self.mapping_strategy == 'traditional'):
+                self.agent_states.init_with_obs(obs,info,original_info)
             self.first_obs = False
 
         # Update state and plan action
-        planner_inputs = self.agent_states.update_state(obs, info)
+        if(self.mapping_strategy == 'neural'):
+            planner_inputs = self.agent_states.update_state(obs, info)
+        elif(self.mapping_strategy == 'traditional'):
+            planner_inputs = self.agent_states.update_state(obs,info,original_info)
         action = self.agent_helper.plan_act(planner_inputs)
         
         return action

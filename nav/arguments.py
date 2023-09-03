@@ -31,6 +31,10 @@ def get_args():
     # Segmentation model
     parser.add_argument('--seg_model_wts', type=str, default='nav/agent/utils/mask_rcnn_R_101_cat9.pth',
                         help='path to segmentation model')
+    parser.add_argument('--segformer_ckpt', type=str, default='/workspaces/peanut-temp/nav/agent/utils/HM3D Finetuned SegFormer - ObjectGoalNav - sqrt weights - Shuffled - full finetune/checkpoint-62216',
+            help='path to segformer segmentation model checkpoint')
+    parser.add_argument('--seg_type', type=str, default='Mask-RCNN',
+        help='Which semantic segmentation model to use - valid choices are [Mask-RCNN,Segformer]')
     
     # Prediction model
     parser.add_argument('--pred_model_wts', type=str, default="./nav/pred_model_wts.pth",
@@ -39,15 +43,17 @@ def get_args():
                         help='path to prediction model config')
     parser.add_argument('--prediction_window', type=int, default=720,
                         help='size of prediction (in pixels)')
+    parser.add_argument('--mapping_strategy', type=str, default="neural",
+                        help='The type of mapping strategy to use, valid = [neural,traditional], neural is the original PONI one')
     
     # Environment, dataset and episode specifications
     parser.add_argument('-efw', '--env_frame_width', type=int, default=640,
                         help='Frame width (default:640)')
     parser.add_argument('-efh', '--env_frame_height', type=int, default=480,
                         help='Frame height (default:480)')
-    parser.add_argument('-fw', '--frame_width', type=int, default=160,
+    parser.add_argument('-fw', '--frame_width', type=int, default=640,
                         help='Frame width (default:160)')
-    parser.add_argument('-fh', '--frame_height', type=int, default=120,
+    parser.add_argument('-fh', '--frame_height', type=int, default=480,
                         help='Frame height (default:120)')
     parser.add_argument('-el', '--max_episode_length', type=int, default=500,
                         help="""Maximum episode length""")

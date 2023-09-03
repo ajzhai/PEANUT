@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import math
 from agent.utils.fmm_planner import FMMPlanner
-from agent.utils.segmentation import SemanticPredMaskRCNN
+from agent.utils.segmentation import SemanticPredMaskRCNN,SegformerSegmenter
 from constants import color_palette
 import agent.utils.pose as pu
 import agent.utils.visualization as vu
@@ -64,7 +64,10 @@ class Agent_Helper:
                                interpolation=Image.NEAREST)])
 
         # initialize semantic segmentation prediction model
-        self.seg_model = SemanticPredMaskRCNN(args)
+        if(args.seg_type == 'Mask-RCNN'):
+            self.seg_model = SemanticPredMaskRCNN(args)
+        elif(args.seg_type =='Segformer'):
+            self.seg_model = SegformerSegmenter(args)
         
         # initializations for planning:
         self.selem = skimage.morphology.disk(args.col_rad)

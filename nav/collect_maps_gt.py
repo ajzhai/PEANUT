@@ -42,7 +42,7 @@ def main():
 
     config.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS = -1
     config.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_EPISODES = 10
-    config.DATASET.SPLIT = 'val'
+    config.DATASET.SPLIT = 'train'
     config.freeze()
     print(config.DATASET.SPLIT)
     
@@ -53,12 +53,12 @@ def main():
     
     print(len(hab_env.episodes), 'episodes in dataset')
     
-    num_episodes = 200
+    num_episodes = 4000
     start = args_2.start_ep
     end = args_2.end_ep if args_2.end_ep > 0 else num_episodes
     
     save_steps = list(range(25, 525, 25))
-    save_dir = './data/saved_maps/val_gt'
+    save_dir = './data/saved_maps/{}_gt'.format(config.DATASET.SPLIT)
     try:
         os.makedirs(save_dir)
     except:

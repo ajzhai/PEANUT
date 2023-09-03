@@ -10,7 +10,7 @@ from habitat.core.env import Env
 from constants import hm3d_names
 import numpy as np
 import matplotlib.pyplot as plt
-
+import open3d as o3d
 from agent.peanut_agent import PEANUT_Agent
 
 
@@ -40,11 +40,15 @@ def main():
     
     save_steps = list(range(25, 525, 25))
     sucs, spls, ep_lens = [], [], []
-    
+    distance_to_goals = []
+    soft_spls = []
     ep_i = 0
     while ep_i < min(num_episodes, end):
         observations = hab_env.reset()
         nav_agent.reset()
+        torch.cuda.empty_cache()
+        o3d.core.cuda.release_cache()
+
         print('-' * 40)
         sys.stdout.flush()
         
@@ -76,14 +80,22 @@ def main():
                 # Log the metrics (save them however you want)
                 sucs.append(metrics['success'])
                 spls.append(metrics['spl'])
+                distance_to_goals.append(metrics['distance_to_goal'])
+                soft_spls.append(metrics['softspl'])
                 ep_lens.append(step_i)
                 print('-' * 40)
-                print('Average Success: %.4f, Average SPL: %.4f' % (np.mean(sucs), np.mean(spls)))
+                print('Average Success: %.4f | Average SPL: %.4f | Average Dist To Goal %.4f | Average SoftSPL %.4f' % (np.mean(sucs), np.mean(spls),np.mean(distance_to_goals),np.mean(soft_spls)))
                 print('-' * 40)
                 sys.stdout.flush()
                 
         ep_i += 1
-        
+    
+    print('\n\n\n\n')
+    print('Final Results')
+    print('-' * 40)
+    print('Average Success: %.4f | Average SPL: %.4f | Average Dist To Goal %.4f | Average SoftSPL %.4f' % (np.mean(sucs), np.mean(spls),np.mean(distance_to_goals),np.mean(soft_spls)))
+    print('-' * 40)
+    print('\n\n\n\n')
 
 if __name__ == "__main__":
     main()
