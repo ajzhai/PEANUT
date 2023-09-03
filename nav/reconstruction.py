@@ -16,7 +16,7 @@ import torch.utils.dlpack
 from torch import linalg as LA
 import torch.nn as nn
 
-init_blocks = 80000
+init_blocks = 100000
 
 def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device = o3d.core.Device('CUDA:0')):
     """ This function returns the coordinates of the voxels containing the query points specified by 'points' and their respective attributes
