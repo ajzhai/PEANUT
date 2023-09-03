@@ -16,7 +16,7 @@ import torch.utils.dlpack
 from torch import linalg as LA
 import torch.nn as nn
 
-init_blocks = 50000
+init_blocks = 80000
 
 def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device = o3d.core.Device('CUDA:0')):
     """ This function returns the coordinates of the voxels containing the query points specified by 'points' and their respective attributes
@@ -315,18 +315,20 @@ class Reconstruction:
         target_points = np.asarray(pcd.points)
         if(self.semantic_integration):
             labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
+            weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
             labels = labels.cpu().numpy().astype(np.float64)
             if labels is not None:
+                weights = weights.cpu().numpy()
                 if(return_raw_logits):
-                    return pcd,labels
+                    return pcd,labels,weights
                 else:
                     labels = labels
                     labels = sm(torch.from_numpy(labels)).numpy()
-                    return pcd,labels
+                    return pcd,labels,weights
             else:
-                return None,None
+                return None,None,None
         else:
-            return pcd,None
+            return pcd,None,weights
 
     def extract_triangle_mesh(self):
         """Returns the current (colored) mesh and the current probability for each class estimate for each of the vertices, if performing metric-semantic reconstruction
@@ -409,17 +411,18 @@ class NaiveAveragingReconstruction(Reconstruction):
         target_points = np.asarray(pcd.points)
         if(self.semantic_integration):
             labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
-
+            weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
             if labels is not None:
+                weights = weights.cpu().numpy()
                 if(return_raw_logits):
                     return pcd,labels.cpu().numpy().astype(np.float64)
                 else:
                     labels = labels.cpu().numpy().astype(np.float64)
-                    return pcd,labels
+                    return pcd,labels,weights
             else:
-                return None,None
+                return None,None,None
         else:
-            return pcd,None
+            return pcd,None,weights
 
     def extract_triangle_mesh(self):
         """Returns the current (colored) mesh and the current probability for each class estimate for each of the vertices, if performing metric-semantic reconstruction
@@ -491,7 +494,9 @@ class GroundTruthGenerator(Reconstruction):
         target_points = np.asarray(pcd.points)
         if(self.semantic_integration):
             labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
+            weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
             if labels is not None:
+                weights = weights.cpu().numpy()
                 labels = labels.cpu().numpy().astype(np.float64)
                 labels[labels.sum(axis =1)==0] = 1/21.0
 
@@ -550,11 +555,11 @@ class GeometricBayes(Reconstruction):
                     labels[np.isnan(labels)] = 1
                     labels = sm(torch.from_numpy(labels)).numpy()
                     #getting the correct probabilities
-                    return pcd,labels
+                    return pcd,labels,weights
             else:
-                return None,None
+                return None,None,None
         else:
-            return pcd,None
+            return pcd,None,weights
 
     def extract_triangle_mesh(self):
         """Returns the current (colored) mesh and the current probability for each class estimate for each of the vertices, if performing metric-semantic reconstruction
@@ -789,8 +794,10 @@ class PeanutMapper():
         self.intrinsic = intrinsic
         self.args = args
         self.verified = False
-        self.weight_threshold = 3 
+        self.weight_threshold = 0.4
+        self.res = 8
         self.integrate_color = True
+        self.starting_pose = None
         if(cuda_device is None):
             self.cuda_device = args.device = torch.device("cuda:" + str(args.sem_gpu_id) if args.cuda else "cpu")
         else:
@@ -809,7 +816,7 @@ class PeanutMapper():
         else:
             raise NotImplementedError('Yo Bro, this is not implemented, is there a typo in the rec type? How did this get through the assertion?')
         
-        self.rec = self.rec_class(voxel_size = self.voxel_size,n_labels = self.n_classes,device = self.device,depth_scale = depth_scale,integrate_color = self.integrate_color)
+        self.rec = self.rec_class(res = self.res,voxel_size = self.voxel_size,n_labels = self.n_classes,device = self.device,depth_scale = depth_scale,integrate_color = self.integrate_color)
         if(intrinsic is None):
             focal_length = 640/(2*np.tan((79/2)*np.pi/180))
             intrinsics = o3d.camera.PinholeCameraIntrinsic()
@@ -824,6 +831,9 @@ class PeanutMapper():
         semseg = obs[4:,:,:].permute(1,2,0).contiguous().cpu().numpy()
         # print(depth.max(),depth.min(),info)
         # pdb.set_trace()
+        if(self.starting_pose is None):
+            self.starting_pose = info
+        info = info-self.starting_pose
         gps = info[:2]
         angle = info[2]
         pose = self.get_pose_from_gps_compass(gps,angle)
@@ -867,38 +877,44 @@ class PeanutMapper():
         if(not self.verified):
             self.verified = self.rec.verify_contents_not_empty(weight_threshold = self.weight_threshold)
         if(self.verified):
-            pcd,labels = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold)
+            pcd,labels,weights = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold)
         else:
             labels = None
         xrange = torch.from_numpy(np.arange(-self.args.map_size_cm/200,self.args.map_size_cm/200,self.args.map_resolution/100)).to(self.cuda_device)
         if(labels is not None):
             # o3d.visualization.draw_geometries([pcd])
-            # o3d.io.write_point_cloud('./debug_pcd.pcd', pcd, write_ascii=False, compressed=True, print_progress=False)
+            o3d.io.write_point_cloud('./debug_pcd.pcd', pcd, write_ascii=False, compressed=True, print_progress=False)
             labels = torch.from_numpy(labels).to(self.cuda_device)
+            weights = torch.from_numpy(weights).to(self.cuda_device).flatten()
             # o3d.visualization.draw_geometries([pcd])
             pcd_t = torch.from_numpy(np.asarray(pcd.points)).to(self.cuda_device)
             # pdb.set_trace()
             height_mask = pcd_t[:,1] >-5.0
             pcd_t = pcd_t[height_mask]
+            weights = weights[height_mask]
             pcd_t[:,0] = -pcd_t[:,0]
             pcd_t[:,2] = pcd_t[:,2]
-
+            thold = 0.2
+            thold_pred = 0.5
+            obstacle_weight_threshold = 4
 
             labels = labels[height_mask]
-            thold = 0.9
             thold_labels = (labels > thold).any(axis = 1)
             hard_labels =labels.argmax(dim =1) + 4
             top_labels = labels.max(dim = 1).values.float()
             hard_labels[~thold_labels] = labels.shape[1]
             # hard_labels = torch.Tensor(hard_labels).long().to(self.cuda_device)
             hard_labels = hard_labels.long()
-            digitized_pcd = torch.bucketize(pcd_t,xrange)
+            digitized_pcd = torch.bucketize(pcd_t,xrange,right = False)
             digitized_Y = digitized_pcd[:,0]
             digitized_X = digitized_pcd[:,2]
             Z = -pcd_t[:,1]
-            obstacle_high = Z<self.args.camera_height
+            obstacle_high = Z<self.args.camera_height + 0.5
             obstacle_low = Z>0.1
+            obstacle_obs = weights>=obstacle_weight_threshold
             obstacle = torch.logical_and(obstacle_high,obstacle_low)
+            obstacle = torch.logical_and(obstacle,obstacle_obs)
+            # pdb.set_trace()
             # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
             # digitized_Y = torch.Tensor(np.digitize(Y,xrange)).long()
             # color_map = torch.zeros(size = (xrange.shape[0],xrange.shape[0],3))
@@ -910,27 +926,18 @@ class PeanutMapper():
             ground_labels = ground_confidences/ground_counts
             ground_labels = torch.nan_to_num(ground_labels,nan = 0,posinf = 0,neginf = 0)
 
-            objectness = (ground_labels[:,:,4:13] > 0).any(axis = 2)
+            objectness = (ground_labels[:,:,4:13] > thold_pred).any(axis = 2)
             # vacant = (ground_labels.sum(axis =2) == 0)
-            explored = ground_counts.sum(axis = 2)>0
-            ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1
+            explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
+            ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1          
+            # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
+            # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
             # ground_labels[objectness][:,0] = 0
             ground_labels[:,:,1][explored] = 1
+            # ground_labels[:,:,4:] = ground_labels[:,:,4:] >thold_pred
             # self.get_color_map_debug(ground_labels,digitized_X,digitized_Y,obstacle)
             ground_labels = ground_labels.permute(2,0,1)
-            # mlo = ground_labels[:,:,:9].argmax(axis = 2)
-            # mlc = ground_labels.argmax(axis = 2)
-            # mlc[digitized_Y[obstacle],digitized_X[obstacle]] = 11
-            # mlc[objectness] = mlo[objectness]
-            # mlc[vacant] = 21
-            # mlc = mlc.cpu().detach().numpy()
-            # COLORS = get_COLORS()
-            # COLORS[0] = np.array([196,176,213])
-            # COLORS[9] = np.array([231,231,231])
-            # COLORS[11] = np.array([157,157,157])
-            # COLORS = np.concatenate((COLORS,np.array([255,255,255]).reshape(1,-1)))
-            # color_map = COLORS[mlc]
-            # color_map = cv2.flip(color_map,0)
+
             del pcd_t
             del Z
             del digitized_pcd
@@ -942,6 +949,9 @@ class PeanutMapper():
             del digitized_Y
             del ground_confidences
             del ground_counts
+            del weights
+            del height_mask
+            del obstacle_obs
             # del vacant
             torch.cuda.empty_cache()
         else:

@@ -270,7 +270,7 @@ class Agent_State:
         """Update the agent's local map."""
 
         args = self.args
-
+        # pdb.set_trace()
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
         # pdb.set_trace()
@@ -351,7 +351,9 @@ class Agent_State:
 
         self.full_map[:, self.lmb[0]:self.lmb[1], self.lmb[2]:self.lmb[3]] = \
                     self.local_map
-            
+
+        # print(torch.unique(self.full_map[4:13]))
+        # pdb.set_trace()            
         # Get prediction aligned with agent's global map
         if self.full_w == args.prediction_window and self.full_h == args.prediction_window:
             object_preds = self.prediction_model.get_prediction(self.full_map.cpu().numpy())
@@ -410,7 +412,9 @@ class Agent_State:
 
         self.dd_wt = dd_wt
         self.value = value
-        
+        # print(np.unique(self.value))
+        # print(np.unique(self.dd_wt),self.dd_wt.max(),self.dd_wt.min())
+        # print(np.unique(self.target_pred),self.target_pred.max(),self.target_pred.min())
         new_global_goal = [np.unravel_index(value.argmax(), value.shape)]
         if new_global_goal != self.last_global_goal:  # avoid repeating the last goal
             self.last_global_goal = self.global_goals
@@ -467,7 +471,7 @@ class Traditional_Agent_State(Agent_State):
         self.init_vgb()
         # Semantic Mapping
     def init_vgb(self):
-        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.049,device =self.o3d_device,cuda_device = self.args.device)
+        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.03,device =self.o3d_device,cuda_device = self.args.device)
         # self.sem_map_module.eval()
 
     def init_with_obs(self, obs, infos,original_infos):
@@ -484,8 +488,9 @@ class Traditional_Agent_State(Agent_State):
         # _, self.local_map, _, self.local_pose = \
         #     self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
         # self.full_map = \
-        self.full_map = self.sem_map_module.update_and_get_map(obs,original_infos,self.full_map)
         self.local_pose = self.get_new_pose_batch(self.local_pose[None,:],self.poses[None,:])[0]
+
+        self.full_map = self.sem_map_module.update_and_get_map(obs,original_infos,self.full_map)
         self.local_map = self.full_map[:,self.lmb[0]:self.lmb[1],self.lmb[2]:self.lmb[3]]
 
 

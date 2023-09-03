@@ -12,7 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import open3d as o3d
 from agent.peanut_agent import PEANUT_Agent
-
+import pandas as pd
 
 def main():
 
@@ -42,7 +42,14 @@ def main():
     sucs, spls, ep_lens = [], [], []
     distance_to_goals = []
     soft_spls = []
+    target_cats  = []
+    per_target_spls = {'bed':[],'toilet':[],'chair':[],'sofa':[],'tv_monitor':[],'plant':[]}
+    per_target_success = {'bed':[],'toilet':[],'chair':[],'sofa':[],'tv_monitor':[],'plant':[]}
+    per_target_softsplt = {'bed':[],'toilet':[],'chair':[],'sofa':[],'tv_monitor':[],'plant':[]}
+    per_target_distance_to_goal = {'bed':[],'toilet':[],'chair':[],'sofa':[],'tv_monitor':[],'plant':[]}
     ep_i = 0
+    failed_eps = []
+    episode_ids = []
     while ep_i < min(num_episodes, end):
         observations = hab_env.reset()
         nav_agent.reset()
@@ -53,9 +60,10 @@ def main():
         sys.stdout.flush()
         
         if ep_i >= start and ep_i < end:
+            target_category =  hm3d_names[observations['objectgoal'][0]]
             print('Episode %d | Target: %s' % (ep_i, hm3d_names[observations['objectgoal'][0]]))
             print('Scene: %s' % hab_env._current_episode.scene_id)
-
+            
             step_i = 0
             seq_i = 0
             
@@ -70,15 +78,22 @@ def main():
                 step_i += 1
                     
             if args.only_explore == 0:
-                
+                episode_ids.append(ep_i)
+
                 print('ended at step %d' % step_i)
                 
                 # Navigation metrics
                 metrics = hab_env.get_metrics()
                 print(metrics)
-                
+                if(metrics['success']<0.5):
+                    failed_eps.append(ep_i)
                 # Log the metrics (save them however you want)
                 sucs.append(metrics['success'])
+                per_target_spls[target_category].append(metrics['spl'])
+                per_target_success[target_category].append(metrics['success'])
+                per_target_softsplt[target_category].append(metrics['softspl'])
+                target_cats.append(target_category)
+                per_target_distance_to_goal[target_category].append(metrics['distance_to_goal'])
                 spls.append(metrics['spl'])
                 distance_to_goals.append(metrics['distance_to_goal'])
                 soft_spls.append(metrics['softspl'])
@@ -91,11 +106,19 @@ def main():
         ep_i += 1
     
     print('\n\n\n\n')
-    print('Final Results')
+    print('Final Results - Aggregate')
     print('-' * 40)
     print('Average Success: %.4f | Average SPL: %.4f | Average Dist To Goal %.4f | Average SoftSPL %.4f' % (np.mean(sucs), np.mean(spls),np.mean(distance_to_goals),np.mean(soft_spls)))
     print('-' * 40)
     print('\n\n\n\n')
-
+    for key in per_target_spls.keys():
+        print('Final Results - {}'.format(key))
+        print('-' * 40)
+        print('Average Success: %.4f | Average SPL: %.4f | Average Dist To Goal %.4f | Average SoftSPL %.4f' % (np.mean(per_target_success[key]), np.mean(per_target_spls[key]),np.mean(per_target_distance_to_goal[key]),np.mean(per_target_softsplt[key])))
+        print('-' * 40,'\n')
+    print(failed_eps)
+    results_summary = {'spl':spls,'success':sucs,'softspl':soft_spls,'distance_to_goals':distance_to_goals,'target':target_cats,'episode_id':episode_ids,'ep_length':ep_lens}
+    df = pd.DataFrame(results_summary)
+    df.to_csv('./logs/{}'.format(args.perf_log_name),sep = '|',index = False)
 if __name__ == "__main__":
     main()

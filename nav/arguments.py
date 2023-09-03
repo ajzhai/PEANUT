@@ -115,8 +115,9 @@ def get_args():
     # For data collection 
     parser.add_argument('--use_gt_seg', type = int, default = 0)
     parser.add_argument('--only_explore', type = int, default = 0)
-
-    # parse arguments
+    parser.add_argument("--perf_log_name", type=str,
+                        default="log.csv",
+                        help="where to log the performance of the runs")    # parse arguments
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
