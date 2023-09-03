@@ -304,7 +304,7 @@ class Agent_State:
 
     def update_full_map(self):
         """Update the agent's full (global) map."""
-        print('updating_full_map')
+        # print('updating_full_map')
         args = self.args 
 
         self.full_map[:, self.lmb[0]:self.lmb[1], self.lmb[2]:self.lmb[3]] = \

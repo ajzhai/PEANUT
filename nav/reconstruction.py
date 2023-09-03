@@ -885,7 +885,7 @@ class PeanutMapper():
 
 
             labels = labels[height_mask]
-            thold = 0.2
+            thold = 0.9
             thold_labels = (labels > thold).any(axis = 1)
             hard_labels =labels.argmax(dim =1) + 4
             top_labels = labels.max(dim = 1).values.float()
@@ -897,7 +897,7 @@ class PeanutMapper():
             digitized_X = digitized_pcd[:,2]
             Z = -pcd_t[:,1]
             obstacle_high = Z<self.args.camera_height
-            obstacle_low = Z>0.05
+            obstacle_low = Z>0.1
             obstacle = torch.logical_and(obstacle_high,obstacle_low)
             # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
             # digitized_Y = torch.Tensor(np.digitize(Y,xrange)).long()
