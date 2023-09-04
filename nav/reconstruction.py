@@ -16,7 +16,7 @@ import torch.utils.dlpack
 from torch import linalg as LA
 import torch.nn as nn
 
-init_blocks = 100000
+init_blocks = 40000
 
 def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device = o3d.core.Device('CUDA:0')):
     """ This function returns the coordinates of the voxels containing the query points specified by 'points' and their respective attributes
@@ -795,9 +795,10 @@ class PeanutMapper():
         self.args = args
         self.verified = False
         self.weight_threshold = 0.4
-        self.res = 8
+        self.res =8
         self.integrate_color = True
         self.starting_pose = None
+        self.trunc_multiplier = 4
         if(cuda_device is None):
             self.cuda_device = args.device = torch.device("cuda:" + str(args.sem_gpu_id) if args.cuda else "cpu")
         else:
@@ -816,7 +817,7 @@ class PeanutMapper():
         else:
             raise NotImplementedError('Yo Bro, this is not implemented, is there a typo in the rec type? How did this get through the assertion?')
         
-        self.rec = self.rec_class(res = self.res,voxel_size = self.voxel_size,n_labels = self.n_classes,device = self.device,depth_scale = depth_scale,integrate_color = self.integrate_color)
+        self.rec = self.rec_class(res = self.res,voxel_size = self.voxel_size,n_labels = self.n_classes,device = self.device,depth_scale = depth_scale,integrate_color = self.integrate_color,trunc_multiplier = self.trunc_multiplier)
         if(intrinsic is None):
             focal_length = 640/(2*np.tan((79/2)*np.pi/180))
             intrinsics = o3d.camera.PinholeCameraIntrinsic()

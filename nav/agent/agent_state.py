@@ -471,7 +471,7 @@ class Traditional_Agent_State(Agent_State):
         self.init_vgb()
         # Semantic Mapping
     def init_vgb(self):
-        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.03,device =self.o3d_device,cuda_device = self.args.device)
+        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.035,device =self.o3d_device,cuda_device = self.args.device)
         # self.sem_map_module.eval()
 
     def init_with_obs(self, obs, infos,original_infos):
@@ -610,7 +610,7 @@ class Traditional_Agent_State(Agent_State):
         self.local_map[2:4, loc_r - traj_rad:loc_r + traj_rad + 1, loc_c - traj_rad:loc_c + traj_rad + 1] = 1.
 
         # Explored under the agent
-        to_fill = (self.selem_idx[0] - (args.col_rad+1) + loc_r, self.selem_idx[1] - (args.col_rad+1) + loc_c)
+        to_fill = (self.selem_idx[0] - (2*args.col_rad+1) + loc_r, self.selem_idx[1] - (2*args.col_rad+1) + loc_c)
         # print('before',self.local_map[1][to_fill])
         self.local_map[1][to_fill] = 1.
         # print('after',self.local_map[1][to_fill])

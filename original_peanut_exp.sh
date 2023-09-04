@@ -8,5 +8,5 @@ export NUMEXPR_NUM_THREADS=5
 export MAGNUM_LOG=quiet HABITAT_SIM_LOG=quiet
 
 
-python nav/collect.py -v 1 --dump_location ./data/tmp --exp_name debug --start_ep 3 --end_ep 167  --mapping_strategy neural --evaluation $AGENT_EVALUATION_TYPE --seg_type Mask-RCNN -fw 160 -fh 120
+python nav/collect.py -v 0 --dump_location ./data/tmp --exp_name debug --start_ep 3 --end_ep 167  --mapping_strategy neural --evaluation $AGENT_EVALUATION_TYPE --seg_type Mask-RCNN -fw 160 -fh 120 --perf_log_name original_part1
 wait
