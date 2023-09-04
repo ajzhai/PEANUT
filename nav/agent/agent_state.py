@@ -443,7 +443,7 @@ class Agent_State:
                 temp_goal = cat_semantic_scores
 
                 # Erosion to remove noisy pixels
-                if (self.goal_cat not in [4,3,2]):  # don't erode TV
+                if (self.goal_cat not in [2,4,5]):  # don't erode TV
                     for _ in range(self.args.goal_erode):
                         temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
                     temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)

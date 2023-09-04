@@ -184,18 +184,18 @@ class Agent_Helper:
             sem_seg_pred = self._get_sem_pred(rgb.astype(np.uint8), depth=depth)
 
         depth = self._preprocess_depth(depth, args.min_depth, args.max_depth)
+        # ds = args.env_frame_width // args.frame_width  # Downscaling factor
 
-        ds = args.env_frame_width // args.frame_width  # Downscaling factor
-        if ds != 1:
-            rgb = np.asarray(self.res(rgb.astype(np.uint8)))
-            depth = depth[ds // 2::ds, ds // 2::ds]
-            sem_seg_pred = sem_seg_pred[ds // 2::ds, ds // 2::ds]
+        # if ds != 1:
+        #     rgb = np.asarray(self.res(rgb.astype(np.uint8)))
+        #     depth = depth[ds // 2::ds, ds // 2::ds]
+        #     sem_seg_pred = sem_seg_pred[ds // 2::ds, ds // 2::ds]
 
-        depth = np.expand_dims(depth, axis=2)
-        state = np.concatenate((rgb, depth, sem_seg_pred),
-                               axis=2).transpose(2, 0, 1)
+        # depth = np.expand_dims(depth, axis=2)
+        # state = np.concatenate((rgb, depth, sem_seg_pred),
+        #                        axis=2).transpose(2, 0, 1)
 
-        return state
+        return (rgb,depth,sem_seg_pred)
 
     def _preprocess_depth(self, depth, min_d, max_d):
         depth = depth[:, :, 0] * 1
