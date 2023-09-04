@@ -16,7 +16,7 @@ import torch.utils.dlpack
 from torch import linalg as LA
 import torch.nn as nn
 
-init_blocks = 40000
+init_blocks = 20000
 
 def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device = o3d.core.Device('CUDA:0')):
     """ This function returns the coordinates of the voxels containing the query points specified by 'points' and their respective attributes
@@ -147,6 +147,7 @@ class Reconstruction:
         self.initialize_vbg()
         self.rays = None
         self.torch_device = torch.device('cuda')
+        self.weight_sizes = None
 
     def initialize_vbg(self):
         if(self.integrate_color and (self.n_labels is None)):
@@ -250,6 +251,12 @@ class Reconstruction:
         o3d.core.cuda.synchronize()
 
         weight = self.vbg.attribute('weight').reshape((-1, 1))
+        if(self.weight_sizes is None):
+            self.weight_sizes = weight.shape
+        # print(weight.shape,self.weight_sizes)
+        if(self.weight_sizes[0] != weight.shape[0]):
+            print('oops, weight changed shape from {} to {}'.format(self.weight_sizes,weight.shape))
+            self.weight_sizes = weight.shape
         tsdf = self.vbg.attribute('tsdf').reshape((-1, 1))
 
         valid_voxel_indices = voxel_indices[mask_proj][mask_inlier]
@@ -842,6 +849,8 @@ class PeanutMapper():
         #filtering dogshit frames
         if((depth>self.args.max_depth).sum()/depth.flatten().shape < 0.98):
             self.rec.update_vbg(depth,self.intrinsics,pose,rgb,semseg)
+        del outer_obs
+        torch.cuda.empty_cache()
 
         # pass
     def update_and_get_map(self,obs,info,old_map):
@@ -875,90 +884,95 @@ class PeanutMapper():
         pass
 
     def get_map(self):
-        if(not self.verified):
-            self.verified = self.rec.verify_contents_not_empty(weight_threshold = self.weight_threshold)
-        if(self.verified):
-            pcd,labels,weights = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold)
-        else:
-            labels = None
-        xrange = torch.from_numpy(np.arange(-self.args.map_size_cm/200,self.args.map_size_cm/200,self.args.map_resolution/100)).to(self.cuda_device)
-        if(labels is not None):
-            # o3d.visualization.draw_geometries([pcd])
-            o3d.io.write_point_cloud('./debug_pcd.pcd', pcd, write_ascii=False, compressed=True, print_progress=False)
-            labels = torch.from_numpy(labels).to(self.cuda_device)
-            weights = torch.from_numpy(weights).to(self.cuda_device).flatten()
-            # o3d.visualization.draw_geometries([pcd])
-            pcd_t = torch.from_numpy(np.asarray(pcd.points)).to(self.cuda_device)
-            # pdb.set_trace()
-            height_mask = pcd_t[:,1] >-5.0
-            pcd_t = pcd_t[height_mask]
-            weights = weights[height_mask]
-            pcd_t[:,0] = -pcd_t[:,0]
-            pcd_t[:,2] = pcd_t[:,2]
-            thold = 0.2
-            thold_pred = 0.5
-            obstacle_weight_threshold = 4
+        with torch.no_grad():
+            if(not self.verified):
+                self.verified = self.rec.verify_contents_not_empty(weight_threshold = self.weight_threshold)
+            if(self.verified):
+                pcd,labels,weights = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold)
+            else:
+                labels = None
+            xrange = torch.from_numpy(np.arange(-self.args.map_size_cm/200,self.args.map_size_cm/200,self.args.map_resolution/100)).to(self.cuda_device)
+            if(labels is not None):
+                # o3d.visualization.draw_geometries([pcd])
+                o3d.io.write_point_cloud('./debug_pcd.pcd', pcd, write_ascii=False, compressed=True, print_progress=False)
+                labels = torch.from_numpy(labels).to(self.cuda_device)
+                weights = torch.from_numpy(weights).to(self.cuda_device).flatten()
+                # o3d.visualization.draw_geometries([pcd])
+                pcd_t = torch.from_numpy(np.asarray(pcd.points)).to(self.cuda_device)
+                # pdb.set_trace()
+                height_mask = pcd_t[:,1] >-5.0
+                pcd_t = pcd_t[height_mask]
+                weights = weights[height_mask]
+                pcd_t[:,0] = -pcd_t[:,0]
+                pcd_t[:,2] = pcd_t[:,2]
+                thold = 0.2
+                thold_pred = 0.6
+                obstacle_weight_threshold = 4
 
-            labels = labels[height_mask]
-            thold_labels = (labels > thold).any(axis = 1)
-            hard_labels =labels.argmax(dim =1) + 4
-            top_labels = labels.max(dim = 1).values.float()
-            hard_labels[~thold_labels] = labels.shape[1]
-            # hard_labels = torch.Tensor(hard_labels).long().to(self.cuda_device)
-            hard_labels = hard_labels.long()
-            digitized_pcd = torch.bucketize(pcd_t,xrange,right = False)
-            digitized_Y = digitized_pcd[:,0]
-            digitized_X = digitized_pcd[:,2]
-            Z = -pcd_t[:,1]
-            obstacle_high = Z<self.args.camera_height + 0.5
-            obstacle_low = Z>0.1
-            obstacle_obs = weights>=obstacle_weight_threshold
-            obstacle = torch.logical_and(obstacle_high,obstacle_low)
-            obstacle = torch.logical_and(obstacle,obstacle_obs)
-            # pdb.set_trace()
-            # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
-            # digitized_Y = torch.Tensor(np.digitize(Y,xrange)).long()
-            # color_map = torch.zeros(size = (xrange.shape[0],xrange.shape[0],3))
-            # class_map = torch.zeros(size = (xrange.shape[0],xrange.shape[0]))
-            ground_confidences = torch.zeros(size = (xrange.shape[0],xrange.shape[0],labels.shape[1]+4),device = self.cuda_device)
-            ground_counts = torch.zeros(size = (xrange.shape[0],xrange.shape[0],labels.shape[1]+4),device = self.cuda_device)
-            ground_counts.index_put_((digitized_Y,digitized_X,hard_labels),torch.ones(labels.shape[0],device=self.cuda_device),accumulate = True)
-            ground_confidences.index_put_((digitized_Y,digitized_X,hard_labels),top_labels,accumulate = True)
-            ground_labels = ground_confidences/ground_counts
-            ground_labels = torch.nan_to_num(ground_labels,nan = 0,posinf = 0,neginf = 0)
+                labels = labels[height_mask]
+                thold_labels = (labels > thold).any(axis = 1)
+                hard_labels =labels.argmax(dim =1) + 4
+                top_labels = labels.max(dim = 1).values.float()
+                hard_labels[~thold_labels] = labels.shape[1]
+                # hard_labels = torch.Tensor(hard_labels).long().to(self.cuda_device)
+                hard_labels = hard_labels.long()
+                digitized_pcd = torch.bucketize(pcd_t,xrange,right = False)
+                Z = -pcd_t[:,1]
 
-            objectness = (ground_labels[:,:,4:13] > thold_pred).any(axis = 2)
-            # vacant = (ground_labels.sum(axis =2) == 0)
-            explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
-            ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1          
-            # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
-            # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
-            # ground_labels[objectness][:,0] = 0
-            ground_labels[:,:,1][explored] = 1
-            # ground_labels[:,:,4:] = ground_labels[:,:,4:] >thold_pred
-            # self.get_color_map_debug(ground_labels,digitized_X,digitized_Y,obstacle)
-            ground_labels = ground_labels.permute(2,0,1)
+                del pcd_t
+                torch.cuda.empty_cache()
 
-            del pcd_t
-            del Z
-            del digitized_pcd
-            del obstacle_high
-            del obstacle_low
-            del obstacle
-            del objectness
-            del digitized_X
-            del digitized_Y
-            del ground_confidences
-            del ground_counts
-            del weights
-            del height_mask
-            del obstacle_obs
-            # del vacant
-            torch.cuda.empty_cache()
-        else:
-            ground_labels = torch.zeros(size = (xrange.shape[0],xrange.shape[0],self.args.num_sem_categories+4),device = self.cuda_device)
-            ground_labels = ground_labels.permute(2,0,1)
-        return ground_labels
+                digitized_Y = digitized_pcd[:,0]
+                digitized_X = digitized_pcd[:,2]
+                obstacle_high = Z<self.args.camera_height + 0.5
+                obstacle_low = Z>0.1
+                obstacle_obs = weights>=obstacle_weight_threshold
+                obstacle = torch.logical_and(obstacle_high,obstacle_low)
+                obstacle = torch.logical_and(obstacle,obstacle_obs)
+                # pdb.set_trace()
+                # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
+                # digitized_Y = torch.Tensor(np.digitize(Y,xrange)).long()
+                # color_map = torch.zeros(size = (xrange.shape[0],xrange.shape[0],3))
+                # class_map = torch.zeros(size = (xrange.shape[0],xrange.shape[0]))
+                ground_confidences = torch.zeros(size = (xrange.shape[0],xrange.shape[0],labels.shape[1]+4),device = self.cuda_device)
+                ground_counts = torch.zeros(size = (xrange.shape[0],xrange.shape[0],labels.shape[1]+4),device = self.cuda_device)
+                ground_counts.index_put_((digitized_Y,digitized_X,hard_labels),torch.ones(labels.shape[0],device=self.cuda_device),accumulate = True)
+                ground_confidences.index_put_((digitized_Y,digitized_X,hard_labels),top_labels,accumulate = True)
+                ground_labels = ground_confidences/ground_counts
+                ground_labels = torch.nan_to_num(ground_labels,nan = 0,posinf = 0,neginf = 0)
+
+                objectness = (ground_labels[:,:,4:13] > thold_pred).any(axis = 2)
+                # vacant = (ground_labels.sum(axis =2) == 0)
+                explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
+                ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1          
+                # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
+                # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
+                # ground_labels[objectness][:,0] = 0
+                ground_labels[:,:,1][explored] = 1
+                # ground_labels[:,:,4:] = ground_labels[:,:,4:] >thold_pred
+                # self.get_color_map_debug(ground_labels,digitized_X,digitized_Y,obstacle)
+                ground_labels = ground_labels.permute(2,0,1)
+                del Z
+                del digitized_pcd
+                del obstacle_high
+                del obstacle_low
+                del obstacle
+                del objectness
+                del digitized_X
+                del digitized_Y
+                del ground_confidences
+                del ground_counts
+                del weights
+                del height_mask
+                del obstacle_obs
+                # del vacant
+                torch.cuda.empty_cache()
+                o3d.core.cuda.release_cache()
+
+            else:
+                ground_labels = torch.zeros(size = (xrange.shape[0],xrange.shape[0],self.args.num_sem_categories+4),device = self.cuda_device)
+                ground_labels = ground_labels.permute(2,0,1)
+            return ground_labels
 
     def get_rotation_matrix_from_compass(self,theta):
         R = np.zeros((3,3))
