@@ -802,10 +802,10 @@ class PeanutMapper():
         self.args = args
         self.verified = False
         self.weight_threshold = 0.4
-        self.res =8
+        self.res = 8
         self.integrate_color = True
         self.starting_pose = None
-        self.trunc_multiplier = 4
+        self.trunc_multiplier = 6
         if(cuda_device is None):
             self.cuda_device = args.device = torch.device("cuda:" + str(args.sem_gpu_id) if args.cuda else "cpu")
         else:
@@ -906,7 +906,7 @@ class PeanutMapper():
                 pcd_t[:,0] = -pcd_t[:,0]
                 pcd_t[:,2] = pcd_t[:,2]
                 thold = 0.2
-                thold_pred = 0.6
+                thold_pred = 0.5
                 obstacle_weight_threshold = 4
 
                 labels = labels[height_mask]

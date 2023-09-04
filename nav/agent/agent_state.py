@@ -610,7 +610,7 @@ class Traditional_Agent_State(Agent_State):
         self.local_map[2:4, loc_r - traj_rad:loc_r + traj_rad + 1, loc_c - traj_rad:loc_c + traj_rad + 1] = 1.
 
         # Explored under the agent
-        to_fill = (self.selem_idx[0] - (2*args.col_rad+1) + loc_r, self.selem_idx[1] - (2*args.col_rad+1) + loc_c)
+        to_fill = (self.selem_idx[0] - (args.col_rad+1) + loc_r, self.selem_idx[1] - (args.col_rad+1) + loc_c)
         # print('before',self.local_map[1][to_fill])
         self.local_map[1][to_fill] = 1.
         # print('after',self.local_map[1][to_fill])
