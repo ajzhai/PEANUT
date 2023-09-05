@@ -5,7 +5,7 @@ University of Illinois at Urbana-Champaign
 
 ICCV 2023
 
-[Paper](https://arxiv.org/abs/2212.02497) │ [Project Page](https://ajzhai.github.io/peanut/)
+[Paper](https://arxiv.org/abs/2212.02497) │ [Project Page](https://ajzhai.github.io/PEANUT/)
 
 ![Example Video](docs/example_vid.gif)
 

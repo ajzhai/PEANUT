@@ -29,6 +29,8 @@ hm3d_to_coco = {0: 0,
                 5: 1}
 coco_to_hm3d = {v : k for k, v in hm3d_to_coco.items()}
 
+map_category_names = {0: "chair", 1: "sofa", 2: "plant",  3: "bed",  4: "toilet",  5: "tv_monitor",
+                      6: "fireplace", 7: "bathtub", 8: "mirror"}
 
 coco_categories_mapping = {
     56: 0,  # chair
