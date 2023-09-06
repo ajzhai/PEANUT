@@ -61,6 +61,11 @@ def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device
         
         # finally, we find the corresponding memory flattened index of the voxels containing the query points, remembering that the slicing order
         # for the dense voxel block is z-y-x for some reason. 
+        # we make sure to clip the values, for robustness sake - no ecc is a pain in the ...
+        qri[:,2] = np.clip(qri[:,2],0,idx.shape[1]-1)
+        qri[:,1] = np.clip(qri[:,1],0,idx.shape[2]-1)
+        qri[:,0] = np.clip(qri[:,0],0,idx.shape[3]-1)
+
         selected_idx = idx[mapping,qri[:,2],qri[:,1],qri[:,0]]
         # we do the same for the coordinates
         coords = coords.reshape((-1,res,res,res,3))
