@@ -286,7 +286,7 @@ class Agent_State:
         loc_c = int(c * 100.0 / args.map_resolution)
         
         # Recording agent trajectory
-        traj_rad = 1
+        traj_rad = 2
         self.local_map[2:4, loc_r - traj_rad:loc_r + traj_rad + 1, loc_c - traj_rad:loc_c + traj_rad + 1] = 1.
 
         # Explored under the agent
@@ -791,7 +791,7 @@ class Mixed_Agent_State(Agent_State):
         loc_c = int(c * 100.0 / args.map_resolution)
         
         # Recording agent trajectory
-        traj_rad = 1
+        traj_rad = 2
         self.local_map[2:4, loc_r - traj_rad:loc_r + traj_rad + 1, loc_c - traj_rad:loc_c + traj_rad + 1] = 1.
 
         # Explored under the agent
