@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import math
 from agent.utils.fmm_planner import FMMPlanner
-from agent.utils.segmentation import SemanticPredMaskRCNN,SegformerSegmenter
+from agent.utils.segmentation import SemanticPredMaskRCNN,SegformerSegmenter,SegformerHighPrecision
 from constants import color_palette
 import agent.utils.pose as pu
 import agent.utils.visualization as vu
@@ -67,7 +67,10 @@ class Agent_Helper:
         if(args.seg_type == 'Mask-RCNN'):
             self.seg_model = SemanticPredMaskRCNN(args)
         elif(args.seg_type =='Segformer'):
-            self.seg_model = SegformerSegmenter(args)
+            if(self.args.mapping_strategy == 'neural'):
+                self.seg_model = SegformerHighPrecision(args)
+            else:
+                self.seg_model = SegformerSegmenter(args)
         
         # initializations for planning:
         self.selem = skimage.morphology.disk(args.col_rad)
@@ -500,13 +503,16 @@ class Agent_Helper:
         """Generate visualization and save."""
 
         args = self.args
+        exp_name = self.args.perf_log_name.rsplit('_',maxsplit = 1)[0]
+        self.exp_name = exp_name
         dump_dir = "{}/dump/{}/".format(args.dump_location,
-                                        args.exp_name)
-        ep_dir = '{}/episodes/thread_{}/eps_{}/'.format(
-            dump_dir, self.rank, self.episode_no - 1)
+                                        exp_name)
+        ep_dir = '{}/episodes/eps_{}/'.format(
+            dump_dir, self.episode_no - 1)
+    
         if not os.path.exists(ep_dir):
             os.makedirs(ep_dir)
-
+        self.ep_dir = ep_dir
         map_pred = inputs['obstacle']
         exp_pred = inputs['exp_pred']
         start_x, start_y, start_o, gx1, gx2, gy1, gy2 = inputs['pose_pred']
@@ -612,14 +618,13 @@ class Agent_Helper:
         
         if args.visualize == 1:
             # Displaying the image
-            cv2.imshow("Thread {}".format(self.rank), self.vis_image)
+            cv2.imshow("{}".format(self.args.perf_log_name), self.vis_image)
             cv2.waitKey(1)
 
         elif args.visualize == 2:
             # Saving the image
-            fn = '{}/episodes/thread_{}/eps_{}/{}-{}-Vis-{}.jpg'.format(
-                dump_dir, self.rank, self.episode_no - 1,
-                self.rank, self.episode_no - 1, self.timestep)
+            fn = '{}/{:04d}.jpg'.format(
+                self.ep_dir, self.timestep)
 
             cv2.imwrite(fn, self.vis_image, [cv2.IMWRITE_JPEG_QUALITY, 100])
 

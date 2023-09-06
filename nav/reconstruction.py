@@ -16,7 +16,7 @@ import torch.utils.dlpack
 from torch import linalg as LA
 import torch.nn as nn
 
-init_blocks = 20000
+init_blocks = 30000
 
 def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device = o3d.core.Device('CUDA:0')):
     """ This function returns the coordinates of the voxels containing the query points specified by 'points' and their respective attributes
@@ -396,7 +396,7 @@ class NaiveAveragingReconstruction(Reconstruction):
         # initializing previously unobserved voxels with uniform prior
         #naive summing of probabilities
         semantic[valid_voxel_indices[weight[valid_voxel_indices].flatten() == 0]] += o3c.Tensor(np.array([1.0/self.n_labels]).astype(np.float32)).to(self.device)
-        semantic_weight[valid_voxel_indices[weight[valid_voxel_indices].flatten() == 0]] += o3c.Tensor(1).to(o3c.float32).to(self.device)
+        semantic_weight[valid_voxel_indices[weight[valid_voxel_indices].flatten() == 0]] += o3c.Tensor(0.2).to(o3c.float32).to(self.device)
 
         #Bayesian update in log space    
         semantic[valid_voxel_indices] = (semantic_weight[valid_voxel_indices].reshape((-1,1))*semantic[valid_voxel_indices]+semantic_readings[mask_inlier])/(semantic_weight[valid_voxel_indices].reshape((-1,1))+1)
@@ -916,7 +916,9 @@ class PeanutMapper():
                 hard_labels[~thold_labels] = labels.shape[1]
                 # hard_labels = torch.Tensor(hard_labels).long().to(self.cuda_device)
                 hard_labels = hard_labels.long()
-                digitized_pcd = torch.bucketize(pcd_t,xrange,right = False)
+                # digitized_pcd = torch.bucketize(pcd_t,xrange,right = False)
+                digitized_pcd = torch.round(torch.clamp(xrange.shape[0]*(pcd_t/(self.args.map_size_cm/100) + 0.5),0,xrange.shape[0]-1)).long()
+
                 Z = -pcd_t[:,1]
 
                 del pcd_t
@@ -941,7 +943,16 @@ class PeanutMapper():
                 ground_labels = ground_confidences/ground_counts
                 ground_labels = torch.nan_to_num(ground_labels,nan = 0,posinf = 0,neginf = 0)
 
-                objectness = (ground_labels[:,:,4:13] > thold_pred).any(axis = 2)
+                valid_detections = (ground_labels[:,:,4:13] > thold_pred)
+                objectness = valid_detections.any(axis =2)
+                ground_labels[:,:,13][objectness] = 0
+                ground_labels[:,:,4:13][valid_detections] = 1
+                ground_labels[:,:,4:13][torch.logical_not(objectness)] = 0
+                #clipping for compatibility with
+                # ground_labels[:,:,4:13][objectness] = 1
+                #ensuring potential objects arent overwritten by background
+                # ground_labels[:,:,13][objectness] = 0
+
                 # vacant = (ground_labels.sum(axis =2) == 0)
                 explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
                 ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1          

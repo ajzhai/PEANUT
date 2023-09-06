@@ -443,8 +443,17 @@ class Agent_State:
                 temp_goal = cat_semantic_scores
 
                 # Erosion to remove noisy pixels
-                if (self.goal_cat not in [2,4,5]):  # don't erode TV
-                    for _ in range(self.args.goal_erode):
+                if(args.mapping_strategy == 'neural'):
+                    non_erosion_set = [5]
+                    fewer_erosions_set = []
+                else:
+                    non_erosion_set = [5]
+                    fewer_erosions_set = [2,4]
+                if (self.goal_cat not in non_erosion_set):  # don't erode TV
+                    for erosion_rounds in range(self.args.goal_erode):
+                        if(self.goal_cat in fewer_erosions_set):
+                            if(erosion_rounds > self.args.goal_erode//2):
+                                break
                         temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
                     temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)
                     
@@ -453,6 +462,8 @@ class Agent_State:
                 if temp_goal.sum() != 0.:
                     self.goal_map = temp_goal
                     self.found_goal = 1
+                else:
+                    self.found_goal = 0
 
 
     def inc_step(self):
@@ -696,7 +707,7 @@ class Mixed_Agent_State(Agent_State):
         self.init_vgb()
         # Semantic Mapping
     def init_vgb(self):
-        self.trad_sem_map_module = PeanutMapper(self.args,voxel_size = 0.0499999,device =self.o3d_device,cuda_device = self.args.device)
+        self.trad_sem_map_module = PeanutMapper(self.args,voxel_size = 0.04999999,device =self.o3d_device,cuda_device = self.args.device)
 
     def init_with_obs(self, obs,unscaled_obs, infos,original_infos):
         """Initialize from initial observation."""

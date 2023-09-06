@@ -101,6 +101,9 @@ def main():
                 print('-' * 40)
                 print('Average Success: %.4f | Average SPL: %.4f | Average Dist To Goal %.4f | Average SoftSPL %.4f' % (np.mean(sucs), np.mean(spls),np.mean(distance_to_goals),np.mean(soft_spls)))
                 print('-' * 40)
+                results_summary = {'spl':spls,'success':sucs,'softspl':soft_spls,'distance_to_goals':distance_to_goals,'target':target_cats,'episode_id':episode_ids,'ep_length':ep_lens}
+                df = pd.DataFrame(results_summary)
+                df.to_csv('./logs/{}'.format(args.perf_log_name),sep = '|',index = False)
                 sys.stdout.flush()
                 
         ep_i += 1

@@ -84,6 +84,25 @@ class SegformerSegmenter():
         seg_out = self.segmenter.get_pred_probs(img)
         img = img[:,:,::-1]
         return seg_out,img
+
+class SegformerHighPrecision():
+    def __init__(self,args):
+        self.segmenter = FineTunedTSegmenter(model_ckpt = args.segformer_ckpt)
+        self.args = args
+    def get_prediction(self, img, depth=None, goal_cat=None):
+        args = self.args
+        seg_out = self.segmenter.get_pred_probs(img)
+        # filtering out low probability predictions:
+        all_classes = set(np.arange(10))
+        non_target = np.array(list(all_classes-set([goal_cat])))
+        invalid_non_goal = seg_out[:,:,non_target]<self.args.sem_pred_prob_thr
+        invalid_goal = seg_out[:,:,goal_cat] < self.args.goal_thr
+        seg_out[:,:,non_target][invalid_non_goal] = 0
+        seg_out[:,:,non_target][np.logical_not(invalid_non_goal)] = 1
+        seg_out[:,:,goal_cat][invalid_goal] = 0
+        seg_out[:,:,goal_cat][np.logical_not(invalid_goal)] = 1
+        img = img[:,:,::-1]
+        return seg_out,img
     
 class FineTunedTSegmenter():
     def __init__(self,temperature = 1,model_ckpt = "./best_model"):
@@ -165,3 +184,10 @@ class FineTunedTSegmenter():
             else:
                 pred = F.interpolate(logits, (x,y),mode='nearest')
         return pred.squeeze().detach().permute((1,2,0)).contiguous().cpu().numpy()
+    
+    def high_precision_classify(self,rgb,depth = None,x=None,y = None,temperature = 1,thold = 0.95):
+        probs = self.get_pred_probs(rgb,depth,x,y,temperature)
+        probs[probs>thold] = 1
+        probs[probs<thold] = 0
+        probs[probs.sum(axis = 2) == 0][:,9] = 1
+        return probs
