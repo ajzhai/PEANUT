@@ -793,8 +793,8 @@ class LearnedGeneralizedIntegration(GeneralizedIntegration):
         return o3c.Tensor(selected_weights).to(self.device).reshape((-1,1)).to(o3c.float32)[mask_inlier]
 
 class PeanutMapper():
-    def __init__(self,args,rec_type = 'Naive Averaging',n_classes = 10,voxel_size = 0.025,device =  o3d.core.Device('CUDA:0'),intrinsic = None,cuda_device = None,depth_scale = 1.0):
-        self.rec_type = rec_type
+    def __init__(self,args,n_classes = 10,voxel_size = 0.025,device =  o3d.core.Device('CUDA:0'),intrinsic = None,cuda_device = None,depth_scale = 1.0):
+        self.rec_type = args.fusion_type
         self.device = device
         self.voxel_size = voxel_size
         self.n_classes = n_classes
@@ -810,16 +810,16 @@ class PeanutMapper():
             self.cuda_device = args.device = torch.device("cuda:" + str(args.sem_gpu_id) if args.cuda else "cpu")
         else:
             self.cuda_device = cuda_device
-        assert self.rec_type in ['Naive Averaging','Naive Bayesian','Histogram','Geometric Mean'],"""Chosen 
+        assert self.rec_type in ['Averaging','Bayesian','Histogram','Geometric'],"""Chosen 
         Reconstruction type {} is not in the allowed reconstruction type list 
-        of ['Naive Averaging','Naive Bayesian','Histogram','Geometric Mean']""".format(self.rec_type)
-        if(self.rec_type == 'Naive Averaging'):
+        of ['Averaging','Bayesian','Histogram','Geometric']""".format(self.rec_type)
+        if(self.rec_type == 'Averaging'):
             self.rec_class = NaiveAveragingReconstruction
         elif(self.rec_type == 'Histogram'):
             self.rec_class = HistogramReconstruction
-        elif(self.rec_type == 'Naive Bayesian'):
+        elif(self.rec_type == 'Bayesian'):
             self.rec_class = Reconstruction
-        elif(self.rec_type == 'Geometric Mean'):
+        elif(self.rec_type == 'Geometric'):
             self.rec_class = GeometricBayes
         else:
             raise NotImplementedError('Yo Bro, this is not implemented, is there a typo in the rec type? How did this get through the assertion?')

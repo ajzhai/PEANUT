@@ -35,7 +35,8 @@ def get_args():
             help='path to segformer segmentation model checkpoint')
     parser.add_argument('--seg_type', type=str, default='Mask-RCNN',
         help='Which semantic segmentation model to use - valid choices are [Mask-RCNN,Segformer]')
-    
+    parser.add_argument('--fusion_type', type=str, default='Averaging',
+        help='Which semantic fusion method to use - valid choices are [Averaging,Bayesian,Geometric,Histogram]')
     # Prediction model
     parser.add_argument('--pred_model_wts', type=str, default="./nav/pred_model_wts.pth",
                         help='path to prediction model weights')
