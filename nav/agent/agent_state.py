@@ -707,7 +707,7 @@ class Mixed_Agent_State(Agent_State):
         self.init_vgb()
         # Semantic Mapping
     def init_vgb(self):
-        self.trad_sem_map_module = PeanutMapper(self.args,voxel_size = 0.04999999,device =self.o3d_device,cuda_device = self.args.device)
+        self.trad_sem_map_module = PeanutMapper(self.args,voxel_size = 0.024999,device =self.o3d_device,cuda_device = self.args.device)
 
     def init_with_obs(self, obs,unscaled_obs, infos,original_infos):
         """Initialize from initial observation."""

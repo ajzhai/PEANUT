@@ -15,23 +15,36 @@ from rendering_utils import render_depth_and_normals,get_camera_rays
 import torch.utils.dlpack
 from torch import linalg as LA
 import torch.nn as nn
+import time
+init_blocks = 50000
 
-init_blocks = 30000
+def get_intrinsics(W,H):
+    focal_length = W/(2*np.tan((79/2)*np.pi/180))
+    intrinsics = o3d.camera.PinholeCameraIntrinsic()
+#     intrinsics.set_intrinsics(width = W, height = H, fx = focal_length,fy = focal_length,cx = W//2,cy = H//2)
+#     intrinsics_matrix = intrinsics.intrinsic_matrix
+    intrinsics_matrix = np.zeros((3,3))
+    intrinsics_matrix[[0,1],[0,1]] = focal_length
+    intrinsics_matrix[2,2] = 1
+    intrinsics_matrix[0,2] = W/2
+    intrinsics_matrix[1,2] = H/2
+    return intrinsics_matrix
 
-def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device = o3d.core.Device('CUDA:0')):
+def get_properties(voxel_grid,points,attributes,res = 8,voxel_size = 0.025,device = o3d.core.Device('CUDA:0')):
     """ This function returns the coordinates of the voxels containing the query points specified by 'points' and their respective attributes
     stored the 'attribute' attribute within the voxel_block_grid 'voxel_grid'
 
     Args:
         voxel_grid (open3d.t.geometry.VoxelBlockGrid): The voxel block grid containing the attributes and coordinates you wish to extract
         points (np.array [Nx3]- dtype np.float32): array containing the XYZ coordinates of the points for which you wish to extract the attributes in global coordinates
-        attribute (str): the string corresponding to the attribute you wish to obtain within your voxel_grid (say, semantic label, color, etc)
+        attribute list [(str)]: the string corresponding to the attribute you wish to obtain within your voxel_grid (say, semantic label, color, etc)
         res (int, optional): Resolution of the dense voxel blocks in your voxel block grid.  Defaults to 8.
         voxel_size (float, optional): side length of the voxels in the voxel_block_grid  Defaults to 0.025.
     """
     if(points.shape[0]>0):
         # we first find the coordinate of the origin of the voxel block of each query point and turn it into an open3d tensor
-        query = np.floor((points/(res*voxel_size)))
+        start = time.time()
+        query = np.floor((points/(res*voxel_size))).astype(np.int32)
         t_query = o3c.Tensor(query.astype(np.int32),device = device)
 
         # we then find the remainder between the voxel block origin and each point to find the within-block coordinates of the voxel containing this point
@@ -43,8 +56,17 @@ def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device
         hm = voxel_grid.hashmap()
 
         # we extract the unique voxel block origins for memory reasons and save the mapping for each individual entry
-        block_c,mapping = np.unique(query,axis = 0,return_inverse = True)
+        start = time.time()
+        # pdb.set_trace()
+        # pickle.dump(query,open('debug_query.p','wb'))
+        # block_c,mapping = np.unique(query,axis = 0,return_inverse = True)
+        block_c,mapping = torch.unique(torch.from_numpy(query).to('cuda:0'),dim = 0,return_inverse = True)
+        block_c = block_c.cpu().numpy()
+        mapping = mapping.cpu().numpy()
+        print('Taking unique took {}'.format(time.time()-start))
+
         t_block_c = o3c.Tensor(block_c.astype(np.int32),device = device)
+        start = time.time()
 
         # we query the hashmap to find the index corresponding to each of the voxel block origins
         r,m = hm.find(t_block_c)
@@ -52,9 +74,7 @@ def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device
         # we then find the flattened indices and coordinates of the individual voxels within each of these voxel blocks in memory
         coords,indices = voxel_grid.voxel_coordinates_and_flattened_indices(r.to(o3c.int32))
     #     print(mapping)
-        # we then extract the attribute we wish to query from the voxel block grid and flatten it
-        attr = voxel_grid.attribute(attribute)
-        attr = attr.reshape((-1,attr.shape[-1]))
+
 
         # we then reshape the index array for easier querying according to the voxel block resolution
         idx = indices.reshape((-1,res,res,res)).cpu().numpy()
@@ -70,8 +90,16 @@ def get_properties(voxel_grid,points,attribute,res = 8,voxel_size = 0.025,device
         # we do the same for the coordinates
         coords = coords.reshape((-1,res,res,res,3))
         selected_coords = coords[mapping,qri[:,2],qri[:,1],qri[:,0],:]
+        all_attrs = {}
+        for attribute in attributes:
+        # we then extract the attribute we wish to query from the voxel block grid and flatten it
+            attr = voxel_grid.attribute(attribute)
+            attr = attr.reshape((-1,attr.shape[-1]))
+            all_attrs.update({attribute:attr[selected_idx,:]})
+
+
         #finally, we return the selected attributes for those indices, as weel as the coordinates of the voxels containing the query points
-        return attr[selected_idx,:],selected_coords
+        return all_attrs,selected_coords
     else: 
         return None,points
 
@@ -149,6 +177,7 @@ class Reconstruction:
         self.semantic_integration = self.n_labels is not None
         self.miu = miu
         self.trunc = self.voxel_size * trunc_multiplier
+        self.trunc_multiplier = trunc_multiplier
         self.initialize_vbg()
         self.rays = None
         self.torch_device = torch.device('cuda')
@@ -216,8 +245,10 @@ class Reconstruction:
         frustum_block_coords = self.vbg.compute_unique_block_coordinates(
             depth, intrinsic, extrinsic, self.depth_scale,
             self.depth_max)
+        
         # Activate them in the underlying hash map (may have been inserted)
         self.vbg.hashmap().activate(frustum_block_coords)
+        self.active_frustum_block_coords = frustum_block_coords
 
         # Find buf indices in the underlying engine
         buf_indices, masks = self.vbg.hashmap().find(frustum_block_coords)
@@ -229,6 +260,8 @@ class Reconstruction:
         # Now project them to the depth and find association
         # (3, N) -> (2, N)
         extrinsic_dev = extrinsic.to(self.device, o3c.float32)
+        self.current_extrinsic = extrinsic_dev
+        self.intrinsic = intrinsic
         xyz = extrinsic_dev[:3, :3] @ voxel_coords.T() + extrinsic_dev[:3,
                                                                     3:]
         intrinsic_dev = intrinsic.to(self.device, o3c.float32)
@@ -314,20 +347,49 @@ class Reconstruction:
         semantic[valid_voxel_indices] = semantic[valid_voxel_indices]+semantic_readings[mask_inlier]
         o3d.core.cuda.synchronize()
 
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0):
+    def extract_visibile_metric_point_cloud(self,weight_threshold = 1.0):
+        start = time.time()
+        cpu_device =  o3d.core.Device('CPU:0')
+        extrinsics = self.current_extrinsic.to(o3c.float64).to(cpu_device)
+        W = 640
+        H = 480
+        intrinsics = get_intrinsics(W,H)
+        intrinsics = o3c.Tensor(intrinsics.astype(np.float64))
+
+        active_block_coords = self.active_frustum_block_coords
+        # print('before rendering took {}'.format(time.time()-start))
+        start = time.time()
+        res = self.vbg.ray_cast(active_block_coords,intrinsic = intrinsics,extrinsic = extrinsics,width = W,height =H,
+                   depth_min = 0.5,depth_max = 5,render_attributes = ['depth'],range_map_down_factor = 8,depth_scale =1,
+                   weight_threshold = weight_threshold,trunc_voxel_multiplier = self.trunc_multiplier)
+        # print('rendering took {}'.format(time.time()-start))
+        start = time.time()
+        depth = o3d.t.geometry.Image(res.depth)
+        pcd = o3d.t.geometry.PointCloud.create_from_depth_image(depth,intrinsics,extrinsics,depth_scale = 1,depth_max = 5.0)
+        # print('point cloud creation took {}'.format(time.time()-start))
+        return pcd
+        
+
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
         Returns:
             open3d.cpu.pybind.t.geometry.PointCloud, np.array(N_points,n_labels) (or None)
         """
-        pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
+        if(visible):
+            pcd = self.extract_visibile_metric_point_cloud(weight_threshold = weight_threshold)
+        else:
+            pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
         pcd = pcd.to_legacy()
         sm = nn.Softmax(dim = 1)
         target_points = np.asarray(pcd.points)
         if(self.semantic_integration):
-            labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
-            weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
+            # labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
+            # weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
+            property_dict,coords = get_properties(self.vbg,target_points,['label','weight'],res = self.res,voxel_size = self.voxel_size,device = self.device)
+            labels = property_dict['label']
+            weights = property_dict['weight']
             if labels is not None:
                 labels = labels.cpu().numpy().astype(np.float64)
                 weights = weights.cpu().numpy()
@@ -410,20 +472,28 @@ class NaiveAveragingReconstruction(Reconstruction):
 
 
 
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
         Returns:
             open3d.cpu.pybind.t.geometry.PointCloud, np.array(N_points,n_labels) (or None)
         """
-        pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
-        # pdb.set_trace()
+        if(visible):
+            start = time.time()
+            pcd = self.extract_visibile_metric_point_cloud(weight_threshold = weight_threshold)
+            # print('Extracting metric point cloud took {}'.format(time.time()-start))
+        else:
+            pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)        # pdb.set_trace()
         pcd = pcd.to_legacy()
         target_points = np.asarray(pcd.points)
         if(self.semantic_integration):
-            labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
-            weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
+            # labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
+            # # print('getting labels took {}'.format(time.time()-start))
+            # weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
+            property_dict,coords = get_properties(self.vbg,target_points,['label','weight'],res = self.res,voxel_size = self.voxel_size,device = self.device)
+            labels = property_dict['label']
+            weights = property_dict['weight']
             if labels is not None:
                 weights = weights.cpu().numpy()
                 if(return_raw_logits):
@@ -484,7 +554,8 @@ class GroundTruthGenerator(Reconstruction):
         mesh = mesh.to_legacy()
         if(self.semantic_integration):
             target_points = np.asarray(mesh.vertices)
-            labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
+            labels,coords = get_properties(self.vbg,target_points,['label'],res = self.res,voxel_size = self.voxel_size,device = self.device)
+            labels = labels['label']
             labels = labels.cpu().numpy().astype(np.float64)
             #getting the correct probabilities
             if(return_raw_logits):
@@ -494,14 +565,19 @@ class GroundTruthGenerator(Reconstruction):
             return mesh,vertex_labels
         else:
             return mesh,None
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
         Returns:
             open3d.cpu.pybind.t.geometry.PointCloud, np.array(N_points,n_labels) (or None)
         """
-        pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
+
+
+        if(visible):
+            pcd = self.extract_visibile_metric_point_cloud(weight_threshold = weight_threshold)
+        else:
+            pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
         pcd = pcd.to_legacy()
         target_points = np.asarray(pcd.points)
         if(self.semantic_integration):
@@ -542,22 +618,28 @@ class HistogramReconstruction(GroundTruthGenerator):
         o3d.core.cuda.synchronize()
 
 class GeometricBayes(Reconstruction):
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
         Returns:
             open3d.cpu.pybind.t.geometry.PointCloud, np.array(N_points,n_labels) (or None)
         """
-        pcd = self.vbg.extract_point_cloud(weight_threshold = 1.0)
+
+        if(visible):
+            pcd = self.extract_visibile_metric_point_cloud(weight_threshold = weight_threshold)
+        else:
+            pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
         pcd = pcd.to_legacy()
         target_points = np.asarray(pcd.points)
         sm = nn.Softmax(dim = 1)
         if(self.semantic_integration):
-            
-            labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
+            property_dict,coords = get_properties(self.vbg,target_points,['label','weight'],res = self.res,voxel_size = self.voxel_size,device = self.device)
+            labels = property_dict['label']
+            weights = property_dict['weight']
+            # labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
             labels = labels.cpu().numpy().astype(np.float64)
-            weights,coords= get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)
+            # weights,coords= get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)
             weights = weights.cpu().numpy().astype(np.float64)
             if labels is not None:
                 if(return_raw_logits):
@@ -680,14 +762,17 @@ class GeneralizedIntegration(Reconstruction):
         o3d.core.cuda.release_cache()
         # return super().update_semantics(semantic_label, v_proj, u_proj, valid_voxel_indices, mask_inlier, weight)
 
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
         Returns:
             open3d.cpu.pybind.t.geometry.PointCloud, np.array(N_points,n_labels) (or None)
         """
-        pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
+        if(visible):
+            pcd = self.extract_visibile_metric_point_cloud(weight_threshold = weight_threshold)
+        else:
+            pcd = self.vbg.extract_point_cloud(weight_threshold = weight_threshold)
         pcd = pcd.to_legacy()
         sm = nn.Softmax(dim = 1)
         target_points = np.asarray(pcd.points)
@@ -810,7 +895,7 @@ class PeanutMapper():
         self.res = 8
         self.integrate_color = True
         self.starting_pose = None
-        self.trunc_multiplier = 6
+        self.trunc_multiplier = 8
         if(cuda_device is None):
             self.cuda_device = args.device = torch.device("cuda:" + str(args.sem_gpu_id) if args.cuda else "cpu")
         else:
@@ -860,7 +945,7 @@ class PeanutMapper():
         # pass
     def update_and_get_map(self,obs,info,old_map):
         self.update_vgb(obs,info)
-        new_map = self.get_map()
+        new_map = self.get_map(old_map)
         new_map[2:4,:,:] = torch.clone(old_map[2:4,:,:])
         new_map[1,:,:] = torch.maximum(new_map[1,:,:],old_map[1,:,:])
         return new_map
@@ -880,7 +965,7 @@ class PeanutMapper():
         COLORS[15] = np.array([157,157,157])
         COLORS = np.concatenate((COLORS,np.array([255,255,255]).reshape(1,-1)))
         color_map = COLORS[mlc].astype(np.uint8)
-        print(color_map.shape,color_map.dtype)
+        # print(color_map.shape,color_map.dtype)
         cv2.imshow('My_map',color_map)
         cv2.waitKey(1)
         
@@ -888,18 +973,24 @@ class PeanutMapper():
         # color_map = cv2.flip(color_map,0)
         pass
 
-    def get_map(self):
+    def get_map(self,old_map):
         with torch.no_grad():
             if(not self.verified):
                 self.verified = self.rec.verify_contents_not_empty(weight_threshold = self.weight_threshold)
             if(self.verified):
-                pcd,labels,weights = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold)
+                start = time.time()
+                pcd,labels,weights = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold,visible = False)
+                print('extracting point cloud took {}'.format(time.time()-start))
             else:
                 labels = None
             xrange = torch.from_numpy(np.arange(-self.args.map_size_cm/200,self.args.map_size_cm/200,self.args.map_resolution/100)).to(self.cuda_device)
             if(labels is not None):
+                # self.rec.vbg.save('debug_vbg.npz')
+                # pickle.dump(self.rec.active_frustum_block_coords,open('frustum_block_coords.p','wb'))
+                # pickle.dump(self.rec.intrinsic,open('instrinsics.p','wb'))
+                # pickle.dump(self.rec.current_extrinsic,open('current_extrinsics.p','wb'))
                 # o3d.visualization.draw_geometries([pcd])
-                o3d.io.write_point_cloud('./debug_pcd.pcd', pcd, write_ascii=False, compressed=True, print_progress=False)
+                # o3d.io.write_point_cloud('./debug_pcd.pcd', pcd, write_ascii=False, compressed=True, print_progress=False)
                 labels = torch.from_numpy(labels).to(self.cuda_device)
                 weights = torch.from_numpy(weights).to(self.cuda_device).flatten()
                 # o3d.visualization.draw_geometries([pcd])
@@ -988,6 +1079,7 @@ class PeanutMapper():
             else:
                 ground_labels = torch.zeros(size = (xrange.shape[0],xrange.shape[0],self.args.num_sem_categories+4),device = self.cuda_device)
                 ground_labels = ground_labels.permute(2,0,1)
+            
             return ground_labels
 
     def get_rotation_matrix_from_compass(self,theta):
@@ -1006,8 +1098,6 @@ class PeanutMapper():
         pose[1,3] = -0.88
         pose[2,3] = gps[0]
         return pose
-
-
 
 
 def main():
