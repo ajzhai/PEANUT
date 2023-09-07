@@ -328,8 +328,8 @@ class Reconstruction:
         if(self.semantic_integration):
             labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
             weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
-            labels = labels.cpu().numpy().astype(np.float64)
             if labels is not None:
+                labels = labels.cpu().numpy().astype(np.float64)
                 weights = weights.cpu().numpy()
                 if(return_raw_logits):
                     return pcd,labels,weights
