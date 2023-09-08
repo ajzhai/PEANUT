@@ -88,7 +88,7 @@ class Agent_State:
         self.value = None
         self.dd_wt = None
         self.last_global_goal = None
-        
+        self.old_selem = None
 
     def reset(self):
         self.l_step = 0
@@ -365,7 +365,23 @@ class Agent_State:
             x2 = x1 + args.prediction_window
             y1 = self.full_h // 2 - args.prediction_window // 2
             y2 = y1 + args.prediction_window
-            object_preds = self.prediction_model.get_prediction(self.full_map[:, x1:x2, y1:y2].cpu().numpy())
+            if(self.args.mapping_strategy == 'neural'):
+                object_preds = self.prediction_model.get_prediction(self.full_map[:, x1:x2, y1:y2].cpu().numpy())
+            else:
+                tmp_map = torch.clone(self.full_map[:, x1:x2, y1:y2])
+                not_confident = torch.logical_not(tmp_map[4:13].max(axis = 0).values > self.args.map_trad_detection_threshold)
+                plausible =  tmp_map[4:13].max(axis = 0).values > 0.2
+                uncertain = torch.logical_and(not_confident,plausible).cpu().numpy()
+                uncertain = skimage.morphology.binary_dilation(uncertain, self.selem)
+                # print(uncertain.sum())
+                tmp_map[0,:,:][uncertain] = 0
+                tmp_map[1,:,:][uncertain] = 0
+                object_preds = self.prediction_model.get_prediction(tmp_map.cpu().numpy())
+                del tmp_map
+                del not_confident
+                del plausible
+                del uncertain
+
             temp = np.zeros((object_preds.shape[0], self.full_w, self.full_h))
             temp[:, x1:x2, y1:y2] = object_preds
             object_preds = temp
@@ -376,7 +392,25 @@ class Agent_State:
         target_pred = object_preds[target,
                                     self.lmb[0]:self.lmb[1],
                                     self.lmb[2]:self.lmb[3]]
-        target_pred *= self.local_map[1].cpu().numpy() < 0.5  # unexplored regions only
+        if(self.args.mapping_strategy == 'neural'):
+            target_pred *= self.local_map[1].cpu().numpy() < 0.5  # unexplored regions only
+        elif(self.args.mapping_strategy in ['mixed',"traditional"]):
+            #only in low confidence or unexplored areas
+            not_confident = self.local_map[4:13].max(axis = 0).values > self.args.map_trad_detection_threshold
+            plausible = self.local_map[4:13].max(axis = 0).values > 0.2
+            uncertain = torch.logical_and(not_confident,plausible)
+            unexplored = self.local_map[1] < 0.5
+            unexplored_or_uncertain = torch.logical_or(unexplored,uncertain).cpu().numpy()
+            unexplored_or_uncertain = skimage.morphology.binary_dilation(unexplored_or_uncertain, self.selem)
+            target_pred *= unexplored_or_uncertain
+            # but remove places I've been to
+            been_to = (self.local_map[2:4].sum(axis = 0) <= 0).cpu().numpy()
+            target_pred *=been_to
+
+            del unexplored
+            del uncertain
+            del unexplored_or_uncertain
+            del plausible
         self.target_pred = target_pred
 
 
@@ -386,6 +420,15 @@ class Agent_State:
         args = self.args
 
         # Weight value based on inverse geodesic distance
+        if(self.found_goal):
+            if(self.old_selem is None):
+                self.old_selem = self.selem
+                self.selem = skimage.morphology.disk(self.args.col_rad-1)
+        else:
+            if(self.old_selem is not None):
+                self.selem = self.old_selem
+                self.old_selem = None
+
         trav = skimage.morphology.binary_dilation(np.rint(self.full_map[0].cpu().numpy()), self.selem) != True
         gx1, gx2, gy1, gy2 = int(self.lmb[0]), int(self.lmb[1]), int(self.lmb[2]), int(self.lmb[3])
         
@@ -439,7 +482,12 @@ class Agent_State:
             if self.local_map[cn, :, :].sum() != 0.:
                 cat_semantic_map = self.local_map[cn, :, :].cpu().numpy()
                 cat_semantic_scores = cat_semantic_map
-                cat_semantic_scores[cat_semantic_scores > 0] = 1.
+
+                if(args.mapping_strategy == 'neural'):
+                    cat_semantic_scores[cat_semantic_scores > 0] = 1.
+                else:
+                    cat_semantic_scores[cat_semantic_scores > self.args.map_trad_detection_threshold] = 1.
+
                 temp_goal = cat_semantic_scores
 
                 # Erosion to remove noisy pixels
@@ -447,8 +495,8 @@ class Agent_State:
                     non_erosion_set = [5]
                     fewer_erosions_set = []
                 else:
-                    non_erosion_set = [5]
-                    fewer_erosions_set = [2,4]
+                    non_erosion_set = []
+                    fewer_erosions_set = [2,4,5]
                 if (self.goal_cat not in non_erosion_set):  # don't erode TV
                     for erosion_rounds in range(self.args.goal_erode):
                         if(self.goal_cat in fewer_erosions_set):
@@ -485,7 +533,7 @@ class Traditional_Agent_State(Agent_State):
         self.init_vgb()
         # Semantic Mapping
     def init_vgb(self):
-        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.035,device =self.o3d_device,cuda_device = self.args.device)
+        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.025,device =self.o3d_device,cuda_device = self.args.device)
         # self.sem_map_module.eval()
 
     def init_with_obs(self, obs, infos,original_infos):

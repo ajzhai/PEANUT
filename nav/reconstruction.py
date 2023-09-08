@@ -56,14 +56,12 @@ def get_properties(voxel_grid,points,attributes,res = 8,voxel_size = 0.025,devic
         hm = voxel_grid.hashmap()
 
         # we extract the unique voxel block origins for memory reasons and save the mapping for each individual entry
-        start = time.time()
         # pdb.set_trace()
         # pickle.dump(query,open('debug_query.p','wb'))
         # block_c,mapping = np.unique(query,axis = 0,return_inverse = True)
         block_c,mapping = torch.unique(torch.from_numpy(query).to('cuda:0'),dim = 0,return_inverse = True)
         block_c = block_c.cpu().numpy()
         mapping = mapping.cpu().numpy()
-        print('Taking unique took {}'.format(time.time()-start))
 
         t_block_c = o3c.Tensor(block_c.astype(np.int32),device = device)
         start = time.time()
@@ -388,9 +386,10 @@ class Reconstruction:
             # labels,coords = get_properties(self.vbg,target_points,'label',res = self.res,voxel_size = self.voxel_size,device = self.device)
             # weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
             property_dict,coords = get_properties(self.vbg,target_points,['label','weight'],res = self.res,voxel_size = self.voxel_size,device = self.device)
-            labels = property_dict['label']
-            weights = property_dict['weight']
-            if labels is not None:
+
+            if property_dict is not None:
+                labels = property_dict['label']
+                weights = property_dict['weight']
                 labels = labels.cpu().numpy().astype(np.float64)
                 weights = weights.cpu().numpy()
                 if(return_raw_logits):
@@ -492,9 +491,10 @@ class NaiveAveragingReconstruction(Reconstruction):
             # # print('getting labels took {}'.format(time.time()-start))
             # weights = get_properties(self.vbg,target_points,'weight',res = self.res,voxel_size = self.voxel_size,device = self.device)[0]
             property_dict,coords = get_properties(self.vbg,target_points,['label','weight'],res = self.res,voxel_size = self.voxel_size,device = self.device)
-            labels = property_dict['label']
-            weights = property_dict['weight']
-            if labels is not None:
+
+            if property_dict is not None:
+                labels = property_dict['label']
+                weights = property_dict['weight']
                 weights = weights.cpu().numpy()
                 if(return_raw_logits):
                     return pcd,labels.cpu().numpy().astype(np.float64)
@@ -891,7 +891,7 @@ class PeanutMapper():
         self.intrinsic = intrinsic
         self.args = args
         self.verified = False
-        self.weight_threshold = 0.4
+        self.weight_threshold = 2
         self.res = 8
         self.integrate_color = True
         self.starting_pose = None
@@ -947,7 +947,13 @@ class PeanutMapper():
         self.update_vgb(obs,info)
         new_map = self.get_map(old_map)
         new_map[2:4,:,:] = torch.clone(old_map[2:4,:,:])
-        new_map[1,:,:] = torch.maximum(new_map[1,:,:],old_map[1,:,:])
+        # new_map[1,:,:] = torch.maximum(new_map[1,:,:],old_map[1,:,:])
+        #making sure traced paths are always available
+        passed_by_there = new_map[2:4,:,:].any(dim = 0)
+        new_map[1,:,:][passed_by_there] = 1
+        new_map[0,:,:][passed_by_there] = 0
+
+        # new_map[1,:,:][new_map[2:4,:,:].any(du)]
         return new_map
     
     def get_color_map_debug(self,ground_labels,digitized_X,digitized_Y,obstacle):
@@ -980,7 +986,7 @@ class PeanutMapper():
             if(self.verified):
                 start = time.time()
                 pcd,labels,weights = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold,visible = False)
-                print('extracting point cloud took {}'.format(time.time()-start))
+                # print('extracting point cloud took {}'.format(time.time()-start))
             else:
                 labels = None
             xrange = torch.from_numpy(np.arange(-self.args.map_size_cm/200,self.args.map_size_cm/200,self.args.map_resolution/100)).to(self.cuda_device)
@@ -996,14 +1002,15 @@ class PeanutMapper():
                 # o3d.visualization.draw_geometries([pcd])
                 pcd_t = torch.from_numpy(np.asarray(pcd.points)).to(self.cuda_device)
                 # pdb.set_trace()
-                height_mask = pcd_t[:,1] >-5.0
+                height_mask = pcd_t[:,1] >-1.8
                 pcd_t = pcd_t[height_mask]
                 weights = weights[height_mask]
                 pcd_t[:,0] = -pcd_t[:,0]
                 pcd_t[:,2] = pcd_t[:,2]
                 thold = 0.2
                 thold_pred = 0.5
-                obstacle_weight_threshold = 4
+                # uncertain_thold = 0.3
+                obstacle_weight_threshold = 1
 
                 labels = labels[height_mask]
                 thold_labels = (labels > thold).any(axis = 1)
@@ -1022,11 +1029,13 @@ class PeanutMapper():
 
                 digitized_Y = digitized_pcd[:,0]
                 digitized_X = digitized_pcd[:,2]
-                obstacle_high = Z<self.args.camera_height + 0.5
-                obstacle_low = Z>0.1
+                obstacle_high = Z<self.args.camera_height + 0.2
+                obstacle_low = Z>0.3
+                downward_stairs = Z < -0.3
                 obstacle_obs = weights>=obstacle_weight_threshold
                 obstacle = torch.logical_and(obstacle_high,obstacle_low)
                 obstacle = torch.logical_and(obstacle,obstacle_obs)
+                obstacle = torch.logical_or(obstacle,downward_stairs)
                 # pdb.set_trace()
                 # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
                 # digitized_Y = torch.Tensor(np.digitize(Y,xrange)).long()
@@ -1041,9 +1050,9 @@ class PeanutMapper():
 
                 valid_detections = (ground_labels[:,:,4:13] > thold_pred)
                 objectness = valid_detections.any(axis =2)
-                ground_labels[:,:,13][objectness] = 0
-                ground_labels[:,:,4:13][valid_detections] = 1
-                ground_labels[:,:,4:13][torch.logical_not(objectness)] = 0
+                # ground_labels[:,:,13][objectness] = 0
+                # ground_labels[:,:,4:13][valid_detections] = 1
+                # ground_labels[:,:,4:13][torch.logical_not(objectness)] = 0
                 #clipping for compatibility with
                 # ground_labels[:,:,4:13][objectness] = 1
                 #ensuring potential objects arent overwritten by background
@@ -1051,11 +1060,14 @@ class PeanutMapper():
 
                 # vacant = (ground_labels.sum(axis =2) == 0)
                 explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
+                # uncertain = torch.logical_and(ground_labels[:,:,4:13] > uncertain_thold,ground_labels[:,:,4:13] < thold_pred).any(axis = 2)
                 ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1          
                 # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
                 # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
                 # ground_labels[objectness][:,0] = 0
                 ground_labels[:,:,1][explored] = 1
+                # ground_labels[:,:,1][uncertain] = 0
+                # ground_labels[:,:,0][uncertain] = 0
                 # ground_labels[:,:,4:] = ground_labels[:,:,4:] >thold_pred
                 # self.get_color_map_debug(ground_labels,digitized_X,digitized_Y,obstacle)
                 ground_labels = ground_labels.permute(2,0,1)
@@ -1072,6 +1084,7 @@ class PeanutMapper():
                 del weights
                 del height_mask
                 del obstacle_obs
+                # del uncertain
                 # del vacant
                 torch.cuda.empty_cache()
                 o3d.core.cuda.release_cache()
