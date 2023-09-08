@@ -952,6 +952,7 @@ class PeanutMapper():
         passed_by_there = new_map[2:4,:,:].any(dim = 0)
         new_map[1,:,:][passed_by_there] = 1
         new_map[0,:,:][passed_by_there] = 0
+        new_map[1,:,:] = torch.maximum(old_map[1,:,:],new_map[1,:,:])
 
         # new_map[1,:,:][new_map[2:4,:,:].any(du)]
         return new_map
@@ -1002,14 +1003,14 @@ class PeanutMapper():
                 # o3d.visualization.draw_geometries([pcd])
                 pcd_t = torch.from_numpy(np.asarray(pcd.points)).to(self.cuda_device)
                 # pdb.set_trace()
-                height_mask = pcd_t[:,1] >-1.8
+                height_mask = pcd_t[:,1] >-5
                 pcd_t = pcd_t[height_mask]
                 weights = weights[height_mask]
                 pcd_t[:,0] = -pcd_t[:,0]
                 pcd_t[:,2] = pcd_t[:,2]
                 thold = 0.2
-                thold_pred = 0.5
-                # uncertain_thold = 0.3
+                thold_pred = self.args.map_trad_detection_threshold
+                uncertain_thold = 0.3
                 obstacle_weight_threshold = 1
 
                 labels = labels[height_mask]
@@ -1029,13 +1030,13 @@ class PeanutMapper():
 
                 digitized_Y = digitized_pcd[:,0]
                 digitized_X = digitized_pcd[:,2]
-                obstacle_high = Z<self.args.camera_height + 0.2
+                obstacle_high = Z<self.args.camera_height + 0.3
                 obstacle_low = Z>0.3
-                downward_stairs = Z < -0.3
+                # downward_stairs = Z < -0.3
                 obstacle_obs = weights>=obstacle_weight_threshold
                 obstacle = torch.logical_and(obstacle_high,obstacle_low)
                 obstacle = torch.logical_and(obstacle,obstacle_obs)
-                obstacle = torch.logical_or(obstacle,downward_stairs)
+                # obstacle = torch.logical_or(obstacle,downward_stairs)
                 # pdb.set_trace()
                 # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
                 # digitized_Y = torch.Tensor(np.digitize(Y,xrange)).long()
@@ -1060,12 +1061,15 @@ class PeanutMapper():
 
                 # vacant = (ground_labels.sum(axis =2) == 0)
                 explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
-                # uncertain = torch.logical_and(ground_labels[:,:,4:13] > uncertain_thold,ground_labels[:,:,4:13] < thold_pred).any(axis = 2)
-                ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1          
+                uncertain = torch.logical_and(ground_labels[:,:,4:13] > uncertain_thold,ground_labels[:,:,4:13] < thold_pred).any(axis = 2)
+                ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1     
+                ground_labels[:,:,0][uncertain] = 0
                 # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
                 # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
                 # ground_labels[objectness][:,0] = 0
                 ground_labels[:,:,1][explored] = 1
+                ground_labels[:,:,1][uncertain] = 0     
+
                 # ground_labels[:,:,1][uncertain] = 0
                 # ground_labels[:,:,0][uncertain] = 0
                 # ground_labels[:,:,4:] = ground_labels[:,:,4:] >thold_pred

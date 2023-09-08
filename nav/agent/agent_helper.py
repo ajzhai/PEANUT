@@ -74,7 +74,7 @@ class Agent_Helper:
         
         # initializations for planning:
         self.selem = skimage.morphology.disk(args.col_rad)
-        self.old_selem = None
+        # self.old_selem = None
         self.obs = None
         self.obs_shape = None
         self.collision_map = None

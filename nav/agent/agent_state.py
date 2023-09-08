@@ -88,7 +88,7 @@ class Agent_State:
         self.value = None
         self.dd_wt = None
         self.last_global_goal = None
-        self.old_selem = None
+        # self.old_selem = None
 
     def reset(self):
         self.l_step = 0
@@ -370,7 +370,7 @@ class Agent_State:
             else:
                 tmp_map = torch.clone(self.full_map[:, x1:x2, y1:y2])
                 not_confident = torch.logical_not(tmp_map[4:13].max(axis = 0).values > self.args.map_trad_detection_threshold)
-                plausible =  tmp_map[4:13].max(axis = 0).values > 0.2
+                plausible =  tmp_map[4:13].max(axis = 0).values > 0.3
                 uncertain = torch.logical_and(not_confident,plausible).cpu().numpy()
                 uncertain = skimage.morphology.binary_dilation(uncertain, self.selem)
                 # print(uncertain.sum())
@@ -419,15 +419,15 @@ class Agent_State:
 
         args = self.args
 
-        # Weight value based on inverse geodesic distance
-        if(self.found_goal):
-            if(self.old_selem is None):
-                self.old_selem = self.selem
-                self.selem = skimage.morphology.disk(self.args.col_rad-1)
-        else:
-            if(self.old_selem is not None):
-                self.selem = self.old_selem
-                self.old_selem = None
+        # # Weight value based on inverse geodesic distance
+        # if(self.found_goal):
+        #     if(self.old_selem is None):
+        #         self.old_selem = self.selem
+        #         self.selem = skimage.morphology.disk(self.args.col_rad-1)
+        # else:
+        #     if(self.old_selem is not None):
+        #         self.selem = self.old_selem
+        #         self.old_selem = None
 
         trav = skimage.morphology.binary_dilation(np.rint(self.full_map[0].cpu().numpy()), self.selem) != True
         gx1, gx2, gy1, gy2 = int(self.lmb[0]), int(self.lmb[1]), int(self.lmb[2]), int(self.lmb[3])
@@ -495,12 +495,12 @@ class Agent_State:
                     non_erosion_set = [5]
                     fewer_erosions_set = []
                 else:
-                    non_erosion_set = []
-                    fewer_erosions_set = [2,4,5]
+                    non_erosion_set = [5]
+                    fewer_erosions_set = [2,4]
                 if (self.goal_cat not in non_erosion_set):  # don't erode TV
                     for erosion_rounds in range(self.args.goal_erode):
                         if(self.goal_cat in fewer_erosions_set):
-                            if(erosion_rounds > self.args.goal_erode//2):
+                            if(erosion_rounds > self.args.goal_erode-1):
                                 break
                         temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
                     temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)
