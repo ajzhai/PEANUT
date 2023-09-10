@@ -422,22 +422,8 @@ class Agent_State:
             del plausible
         self.target_pred = target_pred
 
-
-    def update_global_goal(self):
-        """Update long-term goal based on current location."""
-
+    def update_transversability(self):
         args = self.args
-
-        # # Weight value based on inverse geodesic distance
-        # if(self.found_goal):
-        #     if(self.old_selem is None):
-        #         self.old_selem = self.selem
-        #         self.selem = skimage.morphology.disk(self.args.col_rad-1)
-        # else:
-        #     if(self.old_selem is not None):
-        #         self.selem = self.old_selem
-        #         self.old_selem = None
-
         trav = skimage.morphology.binary_dilation(np.rint(self.full_map[0].cpu().numpy()), self.selem) != True
         gx1, gx2, gy1, gy2 = int(self.lmb[0]), int(self.lmb[1]), int(self.lmb[2]), int(self.lmb[3])
         
@@ -456,6 +442,24 @@ class Agent_State:
         
         if np.sum(dd_wt) < 10 and self.dd_wt is not None:  # stuck inside obstacle, use last dd_wt
             dd_wt = self.dd_wt
+        self.dd_wt = dd_wt
+        return dd
+    def update_global_goal(self):
+        """Update long-term goal based on current location."""
+
+        args = self.args
+
+        # # Weight value based on inverse geodesic distance
+        # if(self.found_goal):
+        #     if(self.old_selem is None):
+        #         self.old_selem = self.selem
+        #         self.selem = skimage.morphology.disk(self.args.col_rad-1)
+        # else:
+        #     if(self.old_selem is not None):
+        #         self.selem = self.old_selem
+        #         self.old_selem = None
+
+        dd = self.update_transversability()
             
         if args.dist_weight_temperature == -1:  # no weighting
             value = self.target_pred
@@ -463,9 +467,8 @@ class Agent_State:
             dd[np.where(dd < 60)] = np.inf
             value = np.exp(-dd / 100.)[self.lmb[0]:self.lmb[1], self.lmb[2]:self.lmb[3]]
         else:
-            value = self.target_pred * dd_wt
+            value = self.target_pred * self.dd_wt
 
-        self.dd_wt = dd_wt
         self.value = value
         # print(np.unique(self.value))
         # print(np.unique(self.dd_wt),self.dd_wt.max(),self.dd_wt.min())
@@ -509,7 +512,7 @@ class Agent_State:
                 if (self.goal_cat not in non_erosion_set):  # don't erode TV
                     for erosion_rounds in range(self.args.goal_erode):
                         if(self.goal_cat in fewer_erosions_set):
-                            if(erosion_rounds > self.args.goal_erode-1):
+                            if(erosion_rounds > self.args.goal_erode-2):
                                 break
                         temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
                     temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)
@@ -619,7 +622,7 @@ class Traditional_Agent_State(Agent_State):
         if(self.target_pred is not None):
             if(np.abs(self.sem_map_module.current_z-self.old_z)>0.1):
                 self.old_z = self.sem_map_module.current_z
-                self.update_global_goal()
+                self.update_transversability()
 
         if self.l_step == args.num_local_steps - 1:
             self.l_step = 0
