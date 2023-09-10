@@ -371,19 +371,19 @@ class Agent_State:
                 object_preds = self.prediction_model.get_prediction(self.full_map[:, x1:x2, y1:y2].cpu().numpy())
             else:
                 tmp_map = torch.clone(self.full_map[:, x1:x2, y1:y2])
-                not_confident = (tmp_map[self.goal_cat,:,:] < self.args.map_trad_detection_threshold)
-                plausible =  tmp_map[self.goal_cat,:,:] > 0.3
-                uncertain = torch.logical_and(not_confident,plausible).cpu().numpy()
+                # not_confident = (tmp_map[self.goal_cat,:,:] < self.args.map_trad_detection_threshold)
+                # plausible =  tmp_map[self.goal_cat,:,:] > 0.3
+                # uncertain = torch.logical_and(not_confident,plausible).cpu().numpy()
 
                 # uncertain = skimage.morphology.binary_dilation(uncertain, self.uncertain_goal_dilation_circle)
 
                 # print(uncertain.sum())
-                tmp_map[0,:,:][uncertain] = 0
-                tmp_map[1,:,:][uncertain] = 0
+                # tmp_map[0,:,:][uncertain] = 0
+                # tmp_map[1,:,:][uncertain] = 0
                 # masking out uncertain regions
                 tmp_map = tmp_map.cpu().numpy()
                 # pdb.set_trace()
-                tmp_map[:,uncertain] = 0
+                # tmp_map[:,uncertain] = 0
                 # print(tmp_map[:,uncertain].shape)
                 object_preds = self.prediction_model.get_prediction(tmp_map)
                 del tmp_map

@@ -1075,7 +1075,7 @@ class PeanutMapper():
                 thold = 0.2
                 thold_pred = self.args.map_trad_detection_threshold
                 uncertain_thold = 0.3
-                obstacle_weight_threshold = 3
+                obstacle_weight_threshold = 6
 
                 labels = labels[height_mask]
                 thold_labels = (labels > thold).any(axis = 1)
@@ -1098,7 +1098,7 @@ class PeanutMapper():
                 del pcd_t
 
                 obstacle_high = Z < (-self.current_z - self.args.camera_height) + self.args.camera_height + 0.2
-                obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.3
+                obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.4
                 # pdb.set_trace()
                 # downward_stairs = Z < -0.3
                 obstacle_obs = weights>=obstacle_weight_threshold
@@ -1134,7 +1134,7 @@ class PeanutMapper():
                 #acounting for all obstacles
                 ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1
                 #eliminating single obstructions
-                ground_labels[:,:,0][ground_counts.sum(axis = 2)<=4] = 0     
+                ground_labels[:,:,0][ground_counts.sum(axis = 2)<=8] = 0     
                 # ground_labels[:,:,0][uncertain] = 0
                 # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
                 # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
