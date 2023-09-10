@@ -89,6 +89,8 @@ class Agent_State:
         self.dd_wt = None
         self.last_global_goal = None
         # self.old_selem = None
+        # self.uncertain_goal_dilation_circle = skimage.morphology.disk(3*args.col_rad)
+
 
     def reset(self):
         self.l_step = 0
@@ -369,14 +371,21 @@ class Agent_State:
                 object_preds = self.prediction_model.get_prediction(self.full_map[:, x1:x2, y1:y2].cpu().numpy())
             else:
                 tmp_map = torch.clone(self.full_map[:, x1:x2, y1:y2])
-                not_confident = torch.logical_not(tmp_map[4:13].max(axis = 0).values > self.args.map_trad_detection_threshold)
-                plausible =  tmp_map[4:13].max(axis = 0).values > 0.3
+                not_confident = (tmp_map[self.goal_cat,:,:] < self.args.map_trad_detection_threshold)
+                plausible =  tmp_map[self.goal_cat,:,:] > 0.3
                 uncertain = torch.logical_and(not_confident,plausible).cpu().numpy()
-                uncertain = skimage.morphology.binary_dilation(uncertain, self.selem)
+
+                # uncertain = skimage.morphology.binary_dilation(uncertain, self.uncertain_goal_dilation_circle)
+
                 # print(uncertain.sum())
                 tmp_map[0,:,:][uncertain] = 0
                 tmp_map[1,:,:][uncertain] = 0
-                object_preds = self.prediction_model.get_prediction(tmp_map.cpu().numpy())
+                # masking out uncertain regions
+                tmp_map = tmp_map.cpu().numpy()
+                # pdb.set_trace()
+                tmp_map[:,uncertain] = 0
+                # print(tmp_map[:,uncertain].shape)
+                object_preds = self.prediction_model.get_prediction(tmp_map)
                 del tmp_map
                 del not_confident
                 del plausible
@@ -396,12 +405,12 @@ class Agent_State:
             target_pred *= self.local_map[1].cpu().numpy() < 0.5  # unexplored regions only
         elif(self.args.mapping_strategy in ['mixed',"traditional"]):
             #only in low confidence or unexplored areas
-            not_confident = self.local_map[4:13].max(axis = 0).values > self.args.map_trad_detection_threshold
-            plausible = self.local_map[4:13].max(axis = 0).values > 0.2
+            not_confident = self.local_map[self.goal_cat] < self.args.map_trad_detection_threshold
+            plausible = self.local_map[self.goal_cat] > 0.2
             uncertain = torch.logical_and(not_confident,plausible)
             unexplored = self.local_map[1] < 0.5
             unexplored_or_uncertain = torch.logical_or(unexplored,uncertain).cpu().numpy()
-            unexplored_or_uncertain = skimage.morphology.binary_dilation(unexplored_or_uncertain, self.selem)
+            # unexplored_or_uncertain = skimage.morphology.binary_dilation(unexplored_or_uncertain, self.uncertain_goal_dilation_circle)
             target_pred *= unexplored_or_uncertain
             # but remove places I've been to
             been_to = (self.local_map[2:4].sum(axis = 0) <= 0).cpu().numpy()
@@ -495,8 +504,8 @@ class Agent_State:
                     non_erosion_set = [5]
                     fewer_erosions_set = []
                 else:
-                    non_erosion_set = [5]
-                    fewer_erosions_set = [2,4]
+                    non_erosion_set = []
+                    fewer_erosions_set = [2,5,4]
                 if (self.goal_cat not in non_erosion_set):  # don't erode TV
                     for erosion_rounds in range(self.args.goal_erode):
                         if(self.goal_cat in fewer_erosions_set):
@@ -533,7 +542,7 @@ class Traditional_Agent_State(Agent_State):
         self.init_vgb()
         # Semantic Mapping
     def init_vgb(self):
-        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.025,device =self.o3d_device,cuda_device = self.args.device)
+        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.035,device =self.o3d_device,cuda_device = self.args.device)
         # self.sem_map_module.eval()
 
     def init_with_obs(self, obs, infos,original_infos):
@@ -753,6 +762,7 @@ class Mixed_Agent_State(Agent_State):
         self.o3d_device = o3d.core.Device("CUDA:" + str(args.sem_gpu_id) if args.cuda else "CPU")
         # print(self.o3d_device)
         self.init_vgb()
+        self.voxel_size = 0.0249
         # Semantic Mapping
     def init_vgb(self):
         self.trad_sem_map_module = PeanutMapper(self.args,voxel_size = 0.024999,device =self.o3d_device,cuda_device = self.args.device)
@@ -763,9 +773,8 @@ class Mixed_Agent_State(Agent_State):
         self.l_step = 0
         self.step = 0
 
-        self.poses = torch.from_numpy(np.asarray(
-            infos['sensor_pose'])
-        ).float().to(self.device)
+        self.poses = torch.from_numpy(np.asarray(infos['sensor_pose'])).float().to(self.device)
+        self.local_map[4:] = 0
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
         
@@ -912,6 +921,6 @@ class Mixed_Agent_State(Agent_State):
         return p_input
 
     def reset_trad_map(self):
-        self.trad_sem_map_module = PeanutMapper(self.args,voxel_size = 0.0499999,device =self.o3d_device,cuda_device = self.args.device)
+        self.trad_sem_map_module = PeanutMapper(self.args,voxel_size = self.voxel_size,device =self.o3d_device,cuda_device = self.args.device)
         torch.cuda.empty_cache()
         o3d.core.cuda.release_cache()

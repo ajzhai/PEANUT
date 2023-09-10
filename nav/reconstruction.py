@@ -16,6 +16,7 @@ import torch.utils.dlpack
 from torch import linalg as LA
 import torch.nn as nn
 import time
+from copy import deepcopy
 init_blocks = 50000
 
 def get_intrinsics(W,H):
@@ -345,10 +346,16 @@ class Reconstruction:
         semantic[valid_voxel_indices] = semantic[valid_voxel_indices]+semantic_readings[mask_inlier]
         o3d.core.cuda.synchronize()
 
-    def extract_visibile_metric_point_cloud(self,weight_threshold = 1.0):
+    def extract_visibile_metric_point_cloud(self,weight_threshold = 1.0,pose = None):
         start = time.time()
         cpu_device =  o3d.core.Device('CPU:0')
-        extrinsics = self.current_extrinsic.to(o3c.float64).to(cpu_device)
+        if(pose is None):
+            extrinsics = self.current_extrinsic.to(o3c.float64).to(cpu_device)
+        else:
+            extrinsics = se3.from_ndarray(pose)
+            extrinsics = se3.ndarray(se3.inv(extrinsics))
+            extrinsics = o3c.Tensor(extrinsics).to(o3c.float64).to(cpu_device)
+
         W = 640
         H = 480
         intrinsics = get_intrinsics(W,H)
@@ -366,9 +373,23 @@ class Reconstruction:
         pcd = o3d.t.geometry.PointCloud.create_from_depth_image(depth,intrinsics,extrinsics,depth_scale = 1,depth_max = 5.0)
         # print('point cloud creation took {}'.format(time.time()-start))
         return pcd
-        
+    
+    def render_rgbd_at_pose(self,pose,weight_threshold = 0.1):
+        W = 640
+        H = 480
+        intrinsics = get_intrinsics(W,H)
+        extrinsic = se3.from_ndarray(pose)
+        extrinsic = se3.ndarray(se3.inv(extrinsic))
+        extrinsic = o3c.Tensor(extrinsic)
+        intrinsics = o3c.Tensor(intrinsics.astype(np.float64))
+        active_block_coords = self.vbg.hashmap().key_tensor()
+        res = self.vbg.ray_cast(active_block_coords,intrinsic = intrinsics,extrinsic = extrinsic,width = W,height =H,
+                        depth_min = 0.5,depth_max = 5.0,render_attributes = ['depth','color'],range_map_down_factor = 8,depth_scale =1.0,
+                        weight_threshold = weight_threshold,trunc_voxel_multiplier = self.trunc_multiplier)
+        return res.depth,res.color
 
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
+
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = False):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
@@ -401,6 +422,8 @@ class Reconstruction:
             else:
                 return None,None,None
         else:
+            property_dict,coords = get_properties(self.vbg,target_points,['weight'],res = self.res,voxel_size = self.voxel_size,device = self.device)
+            weights = property_dict['weight'].cpu().numpy()
             return pcd,None,weights
 
     def extract_triangle_mesh(self):
@@ -471,7 +494,7 @@ class NaiveAveragingReconstruction(Reconstruction):
 
 
 
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = False):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
@@ -504,6 +527,8 @@ class NaiveAveragingReconstruction(Reconstruction):
             else:
                 return None,None,None
         else:
+            property_dict,coords = get_properties(self.vbg,target_points,['weight'],res = self.res,voxel_size = self.voxel_size,device = self.device)
+            weights = property_dict['weight'].cpu().numpy()
             return pcd,None,weights
 
     def extract_triangle_mesh(self):
@@ -565,7 +590,7 @@ class GroundTruthGenerator(Reconstruction):
             return mesh,vertex_labels
         else:
             return mesh,None
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = False):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
@@ -618,7 +643,7 @@ class HistogramReconstruction(GroundTruthGenerator):
         o3d.core.cuda.synchronize()
 
 class GeometricBayes(Reconstruction):
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = False):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
@@ -762,7 +787,7 @@ class GeneralizedIntegration(Reconstruction):
         o3d.core.cuda.release_cache()
         # return super().update_semantics(semantic_label, v_proj, u_proj, valid_voxel_indices, mask_inlier, weight)
 
-    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = True):
+    def extract_point_cloud(self,return_raw_logits = False,weight_threshold = 1.0,visible = False):
 
         """Returns the current (colored) point cloud and the current probability estimate for each of the points, if performing metric-semantic reconstruction
 
@@ -891,11 +916,14 @@ class PeanutMapper():
         self.intrinsic = intrinsic
         self.args = args
         self.verified = False
-        self.weight_threshold = 2
+        self.weight_threshold = 0.4
         self.res = 8
         self.integrate_color = True
         self.starting_pose = None
         self.trunc_multiplier = 8
+        self.total_frames = 0
+        self.current_z = -self.args.camera_height
+        self.estimate_z = self.args.estimate_z > 0
         if(cuda_device is None):
             self.cuda_device = args.device = torch.device("cuda:" + str(args.sem_gpu_id) if args.cuda else "cpu")
         else:
@@ -922,6 +950,10 @@ class PeanutMapper():
             self.intrinsics = intrinsics.intrinsic_matrix
 
     def update_vgb(self,outer_obs,info):
+
+
+
+
         obs = outer_obs.squeeze()
         rgb = obs[:3,:,:].permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8)
         depth = (obs[3:4,:,:]/100).permute(1,2,0).contiguous().cpu().numpy()
@@ -935,6 +967,23 @@ class PeanutMapper():
         gps = info[:2]
         angle = info[2]
         pose = self.get_pose_from_gps_compass(gps,angle)
+
+                
+        if(self.estimate_z):
+            if(not self.verified):
+                self.verified = self.rec.verify_contents_not_empty(weight_threshold = self.weight_threshold)
+            if(self.verified):
+                self.estimate_current_z(rgb,depth,pose)
+                
+        debug_collect = False
+        # print('dumping images')
+        if(debug_collect):
+            print('saving data for debugging!')
+            pickle.dump(depth,open('./debug_imgs/depth_{:4d}.p'.format(self.total_frames),'wb'))
+            pickle.dump(rgb,open('./debug_imgs/rgb_{:4d}.p'.format(self.total_frames),'wb'))
+            pickle.dump(pose,open('./debug_imgs/pose_{:4d}.p'.format(self.total_frames),'wb'))
+            pickle.dump(self.intrinsics,open('./debug_imgs/intrinsics.p'.format(self.total_frames),'wb'))
+            self.total_frames += 1
         # if()
         #filtering dogshit frames
         if((depth>self.args.max_depth).sum()/depth.flatten().shape < 0.98):
@@ -944,6 +993,8 @@ class PeanutMapper():
 
         # pass
     def update_and_get_map(self,obs,info,old_map):
+
+
         self.update_vgb(obs,info)
         new_map = self.get_map(old_map)
         new_map[2:4,:,:] = torch.clone(old_map[2:4,:,:])
@@ -987,6 +1038,7 @@ class PeanutMapper():
             if(self.verified):
                 start = time.time()
                 pcd,labels,weights = self.rec.extract_point_cloud(weight_threshold = self.weight_threshold,visible = False)
+                # metric_pcd,labels,weights = self.extract_point_cloud(weight_threshold = 5, visible = False)
                 # print('extracting point cloud took {}'.format(time.time()-start))
             else:
                 labels = None
@@ -1002,8 +1054,14 @@ class PeanutMapper():
                 weights = torch.from_numpy(weights).to(self.cuda_device).flatten()
                 # o3d.visualization.draw_geometries([pcd])
                 pcd_t = torch.from_numpy(np.asarray(pcd.points)).to(self.cuda_device)
+                # we first filter things within the robot's level
+                Z = -pcd_t[:,1]
                 # pdb.set_trace()
-                height_mask = pcd_t[:,1] >-5
+                pcd_max_height = Z < (-self.current_z - self.args.camera_height) + 3
+                pcd_min_height = Z > (-self.current_z - self.args.camera_height) - 0.2
+                height_mask = torch.logical_and(pcd_max_height,pcd_max_height)
+                # pdb.set_trace()
+                # height_mask = pcd_t[:,1] >-5
                 pcd_t = pcd_t[height_mask]
                 weights = weights[height_mask]
                 pcd_t[:,0] = -pcd_t[:,0]
@@ -1023,15 +1081,19 @@ class PeanutMapper():
                 # digitized_pcd = torch.bucketize(pcd_t,xrange,right = False)
                 digitized_pcd = torch.round(torch.clamp(xrange.shape[0]*(pcd_t/(self.args.map_size_cm/100) + 0.5),0,xrange.shape[0]-1)).long()
 
-                Z = -pcd_t[:,1]
 
-                del pcd_t
                 torch.cuda.empty_cache()
 
                 digitized_Y = digitized_pcd[:,0]
                 digitized_X = digitized_pcd[:,2]
-                obstacle_high = Z<self.args.camera_height + 0.3
-                obstacle_low = Z>0.3
+                # obstacle_high = Z<self.args.camera_height + 0.3
+                # obstacle_low = Z>0.3
+                Z = -pcd_t[:,1]
+                del pcd_t
+
+                obstacle_high = Z < (-self.current_z - self.args.camera_height) + self.args.camera_height - 0.1
+                obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.2
+                # pdb.set_trace()
                 # downward_stairs = Z < -0.3
                 obstacle_obs = weights>=obstacle_weight_threshold
                 obstacle = torch.logical_and(obstacle_high,obstacle_low)
@@ -1112,9 +1174,76 @@ class PeanutMapper():
         pose = np.eye(4)
         pose[:3,:3] = self.get_rotation_matrix_from_compass(compass)
         pose[0,3] = gps[1]
-        pose[1,3] = -0.88
+        pose[1,3] = self.current_z
         pose[2,3] = gps[0]
         return pose
+
+
+    def estimate_current_z(self,rgb,depth,pose):
+        rgb = o3d.t.geometry.Image(o3c.Tensor(rgb,device = self.device))
+        depth = o3d.t.geometry.Image(o3c.Tensor(depth,device = self.device))
+        rgbd_next = o3d.t.geometry.RGBDImage(rgb,depth,aligned = True)
+        best_delta = self.compare_and_score(self.rec,rgbd_next,self.current_z,pose,self.intrinsics)
+        del rgb
+        del depth
+        del rgbd_next
+        # pdb.set_trace()
+        self.current_z += best_delta
+
+    def compare_and_score(self,rec,rgbd,current_z,pose,intrinsic):
+        live_pcd = o3d.t.geometry.PointCloud.create_from_rgbd_image(
+            rgbd,intrinsic,depth_scale = 1.0,depth_max = 5.0)
+        #filtering out non-informative pcds (i.e. looking at walls)
+        best_delta = 0
+        if(live_pcd.point.positions.shape[0] > 50000):
+            live_pcd = live_pcd.voxel_down_sample(voxel_size = 0.05)
+            tmp_pcd = rec.extract_visibile_metric_point_cloud(pose = pose,weight_threshold = 5)
+            if(tmp_pcd.point.positions.shape[0] > 100):
+                tmp_pcd = tmp_pcd.voxel_down_sample(voxel_size = 0.05)
+                zero_fitness = self.eval_fitness_at_delta(pose,current_z,0,tmp_pcd,live_pcd)
+                delta_to_starting = pose[1,3]-current_z
+                best_delta = 0
+                zero_delta = 0
+                starting_height_fitness = self.eval_fitness_at_delta(pose,current_z,delta_to_starting,tmp_pcd,live_pcd)
+                if(starting_height_fitness > zero_fitness):
+                    best_delta = delta_to_starting
+                    zero_fitness = starting_height_fitness
+                    zero_delta = delta_to_starting
+                # if zero delta is sufficiently good, avoid unecessary computation
+                if(zero_fitness < 0.995):
+                    # print('searching')
+                    line_to_search = np.arange(-0.2,0.2,0.025).tolist()                   
+                    max_fitness = zero_fitness
+                    for delta in line_to_search:
+                        fitness = self.eval_fitness_at_delta(pose,current_z,delta,tmp_pcd,live_pcd)
+                        if(delta == 0):
+                            zero_fitness = fitness
+                        if(fitness >max_fitness):
+                            best_delta = delta
+                            max_fitness = fitness
+                    if(np.abs(max_fitness - zero_fitness) < 0.02):
+                        best_delta = zero_delta
+                del live_pcd
+                del tmp_pcd
+            else:
+                best_delta = 0
+        else:
+            best_delta = 0
+
+        #     print(max_fitness,best_delta)
+        return best_delta
+
+    def eval_fitness_at_delta(self,pose,current_z,delta,tmp_pcd,live_pcd):
+        pose_candidate = deepcopy(pose)
+        pose_candidate[1,3] = current_z + delta
+        extrinsics = se3.from_ndarray(pose_candidate)
+        proper_pose = se3.ndarray(se3.inv(extrinsics))
+    #     print(pose_candidate)
+    #     translated_pcd = live_pcd.transform(o3c.Tensor(pose_candidate))
+        fitness = o3d.t.pipelines.registration.evaluate_registration(tmp_pcd,
+                        live_pcd, 0.1, transformation=o3c.Tensor(proper_pose)).fitness
+        return fitness
+
 
 
 def main():

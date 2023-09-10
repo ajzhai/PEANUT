@@ -21,11 +21,11 @@ from detectron2.engine import DefaultPredictor
 import detectron2.data.transforms as T
 from transformers import SegformerFeatureExtractor, SegformerForSemanticSegmentation
 from PIL import Image
-
-import pdb
+from constants import color_palette
 
 def debug_tensor(label, tensor):
     print(label, tensor.size(), tensor.mean().item(), tensor.std().item())
+
 
 
 class SemanticPredMaskRCNN():
