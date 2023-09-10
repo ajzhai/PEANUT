@@ -371,15 +371,15 @@ class Agent_State:
                 object_preds = self.prediction_model.get_prediction(self.full_map[:, x1:x2, y1:y2].cpu().numpy())
             else:
                 tmp_map = torch.clone(self.full_map[:, x1:x2, y1:y2])
-                # not_confident = (tmp_map[self.goal_cat,:,:] < self.args.map_trad_detection_threshold)
-                # plausible =  tmp_map[self.goal_cat,:,:] > 0.3
-                # uncertain = torch.logical_and(not_confident,plausible).cpu().numpy()
+                not_confident = (tmp_map[4+self.goal_cat,:,:] < self.args.map_trad_detection_threshold)
+                plausible =  tmp_map[4+self.goal_cat,:,:] > 0.6
+                uncertain = torch.logical_and(not_confident,plausible).cpu().numpy()
 
-                # uncertain = skimage.morphology.binary_dilation(uncertain, self.uncertain_goal_dilation_circle)
+                uncertain = skimage.morphology.binary_dilation(uncertain, self.uncertain_goal_dilation_circle)
 
                 # print(uncertain.sum())
-                # tmp_map[0,:,:][uncertain] = 0
-                # tmp_map[1,:,:][uncertain] = 0
+                tmp_map[0,:,:][uncertain] = 0
+                tmp_map[1,:,:][uncertain] = 0
                 # masking out uncertain regions
                 tmp_map = tmp_map.cpu().numpy()
                 # pdb.set_trace()
@@ -405,21 +405,22 @@ class Agent_State:
             target_pred *= self.local_map[1].cpu().numpy() < 0.5  # unexplored regions only
         elif(self.args.mapping_strategy in ['mixed',"traditional"]):
             #only in low confidence or unexplored areas
-            not_confident = self.local_map[self.goal_cat] < self.args.map_trad_detection_threshold
-            plausible = self.local_map[self.goal_cat] > 0.2
+            not_confident = self.local_map[4+self.goal_cat] < self.args.map_trad_detection_threshold
+            plausible = self.local_map[4+self.goal_cat] > 0.5
             uncertain = torch.logical_and(not_confident,plausible)
             unexplored = self.local_map[1] < 0.5
             unexplored_or_uncertain = torch.logical_or(unexplored,uncertain).cpu().numpy()
-            # unexplored_or_uncertain = skimage.morphology.binary_dilation(unexplored_or_uncertain, self.uncertain_goal_dilation_circle)
+            unexplored_or_uncertain = skimage.morphology.binary_dilation(unexplored_or_uncertain, self.uncertain_goal_dilation_circle)
             target_pred *= unexplored_or_uncertain
             # but remove places I've been to
             been_to = (self.local_map[2:4].sum(axis = 0) <= 0).cpu().numpy()
-            target_pred *=been_to
+            target_pred *= self.local_map[1].cpu().numpy() < 0.5
+            # target_pred *=been_to
 
-            del unexplored
-            del uncertain
-            del unexplored_or_uncertain
-            del plausible
+            # del unexplored
+            # del uncertain
+            # del unexplored_or_uncertain
+            # del plausible
         self.target_pred = target_pred
 
     def update_transversability(self):
@@ -679,7 +680,7 @@ class Traditional_Agent_State(Agent_State):
         locs = self.local_pose.cpu().numpy()
         self.planner_pose_inputs[:3] = locs + self.origins
         self.local_map[2, :, :].fill_(0.)  # Resetting current location channel
-
+        # print(torch.unique(self.local_map[4+self.goal_cat,:,:]))
         r, c = locs[1], locs[0]
         loc_r = int(r * 100.0 / args.map_resolution)
         loc_c = int(c * 100.0 / args.map_resolution)

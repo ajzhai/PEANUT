@@ -1072,16 +1072,16 @@ class PeanutMapper():
                 weights = weights[height_mask]
                 pcd_t[:,0] = -pcd_t[:,0]
                 pcd_t[:,2] = pcd_t[:,2]
-                thold = 0.2
+                # thold = 0.2
                 thold_pred = self.args.map_trad_detection_threshold
                 uncertain_thold = 0.3
-                obstacle_weight_threshold = 6
+                obstacle_weight_threshold = 2
 
                 labels = labels[height_mask]
-                thold_labels = (labels > thold).any(axis = 1)
+                # thold_labels = (labels > thold).any(axis = 1)
                 hard_labels =labels.argmax(dim =1) + 4
                 top_labels = labels.max(dim = 1).values.float()
-                hard_labels[~thold_labels] = labels.shape[1]
+                # hard_labels[~thold_labels] = labels.shape[1]
                 # hard_labels = torch.Tensor(hard_labels).long().to(self.cuda_device)
                 hard_labels = hard_labels.long()
                 # digitized_pcd = torch.bucketize(pcd_t,xrange,right = False)
@@ -1097,8 +1097,8 @@ class PeanutMapper():
                 Z = -pcd_t[:,1]
                 del pcd_t
 
-                obstacle_high = Z < (-self.current_z - self.args.camera_height) + self.args.camera_height + 0.2
-                obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.4
+                obstacle_high = Z < (-self.current_z - self.args.camera_height) + self.args.camera_height
+                obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.2
                 # pdb.set_trace()
                 # downward_stairs = Z < -0.3
                 obstacle_obs = weights>=obstacle_weight_threshold
@@ -1119,6 +1119,7 @@ class PeanutMapper():
                 # ground_labels[:,:,1][ground_counts.sum]
                 valid_detections = (ground_labels[:,:,4:13] > thold_pred)
                 objectness = valid_detections.any(axis =2)
+                # pdb.set_trace()
                 # ground_labels[:,:,13][objectness] = 0
                 # ground_labels[:,:,4:13][valid_detections] = 1
                 # ground_labels[:,:,4:13][torch.logical_not(objectness)] = 0
