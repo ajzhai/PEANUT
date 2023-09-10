@@ -1052,6 +1052,7 @@ class PeanutMapper():
                 # o3d.io.write_point_cloud('./debug_pcd.pcd', pcd, write_ascii=False, compressed=True, print_progress=False)
                 labels = torch.from_numpy(labels).to(self.cuda_device)
                 weights = torch.from_numpy(weights).to(self.cuda_device).flatten()
+                labels[weights < 2,:] = 0 
                 # o3d.visualization.draw_geometries([pcd])
                 pcd_t = torch.from_numpy(np.asarray(pcd.points)).to(self.cuda_device)
                 # we first filter things within the robot's level
@@ -1092,7 +1093,7 @@ class PeanutMapper():
                 del pcd_t
 
                 obstacle_high = Z < (-self.current_z - self.args.camera_height) + self.args.camera_height - 0.1
-                obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.2
+                obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.3
                 # pdb.set_trace()
                 # downward_stairs = Z < -0.3
                 obstacle_obs = weights>=obstacle_weight_threshold
