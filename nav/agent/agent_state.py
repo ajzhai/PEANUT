@@ -540,9 +540,10 @@ class Traditional_Agent_State(Agent_State):
         # print(self.o3d_device)
         del self.sem_map_module
         self.init_vgb()
+        self.old_z = self.args.camera_height
         # Semantic Mapping
     def init_vgb(self):
-        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.035,device =self.o3d_device,cuda_device = self.args.device)
+        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.025,device =self.o3d_device,cuda_device = self.args.device)
         # self.sem_map_module.eval()
 
     def init_with_obs(self, obs, infos,original_infos):
@@ -615,6 +616,10 @@ class Traditional_Agent_State(Agent_State):
         # pdb.set_trace()
         # print(self.poses)
         self.update_local_map(obs,oringinal_infos)
+        if(self.target_pred is not None):
+            if(np.abs(self.sem_map_module.current_z-self.old_z)>0.1):
+                self.old_z = self.sem_map_module.current_z
+                self.update_global_goal()
 
         if self.l_step == args.num_local_steps - 1:
             self.l_step = 0

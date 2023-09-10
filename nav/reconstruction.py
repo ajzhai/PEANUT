@@ -990,6 +990,7 @@ class PeanutMapper():
             self.rec.update_vbg(depth,self.intrinsics,pose,rgb,semseg)
         del outer_obs
         torch.cuda.empty_cache()
+        self.total_frames += 1
 
         # pass
     def update_and_get_map(self,obs,info,old_map):
@@ -1044,6 +1045,10 @@ class PeanutMapper():
                 labels = None
             xrange = torch.from_numpy(np.arange(-self.args.map_size_cm/200,self.args.map_size_cm/200,self.args.map_resolution/100)).to(self.cuda_device)
             if(labels is not None):
+
+                # pickle.dump(pcd,open('pcd_{:04d}.p'.format(self.total_frames),'wb'))
+                # o3d.io.write_point_cloud('./debug_imgs/pcd_{:04d}.pcd'.format(self.total_frames), pcd, write_ascii=False, compressed=True, print_progress=False)
+                # pickle.dump(self.current_z,open('./debug_imgs/height_{:04d}'.format(self.total_frames),'wb'))
                 # self.rec.vbg.save('debug_vbg.npz')
                 # pickle.dump(self.rec.active_frustum_block_coords,open('frustum_block_coords.p','wb'))
                 # pickle.dump(self.rec.intrinsic,open('instrinsics.p','wb'))
@@ -1058,7 +1063,7 @@ class PeanutMapper():
                 # we first filter things within the robot's level
                 Z = -pcd_t[:,1]
                 # pdb.set_trace()
-                pcd_max_height = Z < (-self.current_z - self.args.camera_height) + 3
+                pcd_max_height = Z < (-self.current_z - self.args.camera_height) + 4
                 pcd_min_height = Z > (-self.current_z - self.args.camera_height) - 0.2
                 height_mask = torch.logical_and(pcd_max_height,pcd_max_height)
                 # pdb.set_trace()
@@ -1092,13 +1097,13 @@ class PeanutMapper():
                 Z = -pcd_t[:,1]
                 del pcd_t
 
-                obstacle_high = Z < (-self.current_z - self.args.camera_height) + self.args.camera_height - 0.1
+                obstacle_high = Z < (-self.current_z - self.args.camera_height) + self.args.camera_height + 0.2
                 obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.3
                 # pdb.set_trace()
                 # downward_stairs = Z < -0.3
-                obstacle_obs = weights>=obstacle_weight_threshold
+                # obstacle_obs = weights>=obstacle_weight_threshold
                 obstacle = torch.logical_and(obstacle_high,obstacle_low)
-                obstacle = torch.logical_and(obstacle,obstacle_obs)
+                # obstacle = torch.logical_and(obstacle,obstacle_obs)
                 # obstacle = torch.logical_or(obstacle,downward_stairs)
                 # pdb.set_trace()
                 # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
@@ -1126,12 +1131,12 @@ class PeanutMapper():
                 explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
                 uncertain = torch.logical_and(ground_labels[:,:,4:13] > uncertain_thold,ground_labels[:,:,4:13] < thold_pred).any(axis = 2)
                 ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1     
-                ground_labels[:,:,0][uncertain] = 0
+                # ground_labels[:,:,0][uncertain] = 0
                 # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
                 # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
                 # ground_labels[objectness][:,0] = 0
                 ground_labels[:,:,1][explored] = 1
-                ground_labels[:,:,1][uncertain] = 0     
+                # ground_labels[:,:,1][uncertain] = 0     
 
                 # ground_labels[:,:,1][uncertain] = 0
                 # ground_labels[:,:,0][uncertain] = 0
@@ -1150,7 +1155,7 @@ class PeanutMapper():
                 del ground_counts
                 del weights
                 del height_mask
-                del obstacle_obs
+                # del obstacle_obs
                 # del uncertain
                 # del vacant
                 torch.cuda.empty_cache()
