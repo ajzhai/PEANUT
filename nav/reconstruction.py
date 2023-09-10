@@ -916,7 +916,7 @@ class PeanutMapper():
         self.intrinsic = intrinsic
         self.args = args
         self.verified = False
-        self.weight_threshold = 0.4
+        self.weight_threshold = 2
         self.res = 8
         self.integrate_color = True
         self.starting_pose = None
@@ -1075,7 +1075,7 @@ class PeanutMapper():
                 thold = 0.2
                 thold_pred = self.args.map_trad_detection_threshold
                 uncertain_thold = 0.3
-                obstacle_weight_threshold = 1
+                obstacle_weight_threshold = 3
 
                 labels = labels[height_mask]
                 thold_labels = (labels > thold).any(axis = 1)
@@ -1101,9 +1101,9 @@ class PeanutMapper():
                 obstacle_low = Z > (-self.current_z - self.args.camera_height) + 0.3
                 # pdb.set_trace()
                 # downward_stairs = Z < -0.3
-                # obstacle_obs = weights>=obstacle_weight_threshold
+                obstacle_obs = weights>=obstacle_weight_threshold
                 obstacle = torch.logical_and(obstacle_high,obstacle_low)
-                # obstacle = torch.logical_and(obstacle,obstacle_obs)
+                obstacle = torch.logical_and(obstacle,obstacle_obs)
                 # obstacle = torch.logical_or(obstacle,downward_stairs)
                 # pdb.set_trace()
                 # digitized_X = torch.Tensor(np.digitize(X,xrange)).long()
@@ -1116,7 +1116,7 @@ class PeanutMapper():
                 ground_confidences.index_put_((digitized_Y,digitized_X,hard_labels),top_labels,accumulate = True)
                 ground_labels = ground_confidences/ground_counts
                 ground_labels = torch.nan_to_num(ground_labels,nan = 0,posinf = 0,neginf = 0)
-
+                # ground_labels[:,:,1][ground_counts.sum]
                 valid_detections = (ground_labels[:,:,4:13] > thold_pred)
                 objectness = valid_detections.any(axis =2)
                 # ground_labels[:,:,13][objectness] = 0
@@ -1130,7 +1130,11 @@ class PeanutMapper():
                 # vacant = (ground_labels.sum(axis =2) == 0)
                 explored = torch.logical_and(ground_counts.sum(axis = 2)>0,torch.any(ground_labels[:,:,4:]>thold_pred,dim = 2))
                 uncertain = torch.logical_and(ground_labels[:,:,4:13] > uncertain_thold,ground_labels[:,:,4:13] < thold_pred).any(axis = 2)
-                ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1     
+                
+                #acounting for all obstacles
+                ground_labels[digitized_Y[obstacle],digitized_X[obstacle],0] = 1
+                #eliminating single obstructions
+                ground_labels[:,:,0][ground_counts.sum(axis = 2)<=4] = 0     
                 # ground_labels[:,:,0][uncertain] = 0
                 # ground_labels.index_put_((digitized_Y[obstacle],digitized_X[obstacle],torch.zeros(digitized_X[obstacle].shape[0],device=self.cuda_device).long()),torch.ones(digitized_X[obstacle].shape[0],device=self.cuda_device),accumulate = True)
                 # ground_labels[:,:,0] = ground_labels[:,:,0] > 5
