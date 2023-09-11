@@ -16,7 +16,7 @@ from agent.prediction import PEANUT_Prediction_Model
 from arguments import get_args
 from reconstruction import NaiveAveragingReconstruction,PeanutMapper
 import open3d as o3d
-
+import cv2 
 def add_boundary(mat, value=1):
     h, w = mat.shape
     new_mat = np.zeros((h + 2, w + 2)) + value
@@ -382,6 +382,8 @@ class Agent_State:
                 tmp_map[1,:,:][uncertain] = 0
                 # masking out uncertain regions
                 tmp_map = tmp_map.cpu().numpy()
+                # tmp_map[4:,:,:] = tmp_map[4:,:,:] > args.map_trad_detection_threshold
+
                 # pdb.set_trace()
                 # tmp_map[:,uncertain] = 0
                 # print(tmp_map[:,uncertain].shape)
@@ -513,7 +515,7 @@ class Agent_State:
                     fewer_erosions_set = [2,5,4]
                 if (self.goal_cat not in non_erosion_set):  # don't erode TV
                     if(self.goal_cat in more_erosions_set):
-                        tmp_erosion = self.args.goal_erode + 3
+                        tmp_erosion = self.args.goal_erode + 1
                     else:
                         tmp_erosion = self.args.goal_erode
                     for erosion_rounds in range(tmp_erosion):
@@ -522,15 +524,42 @@ class Agent_State:
                                 break
                         temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
                     temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)
-                    
+                # perform_non_maximum suppresion:
+                # import pickle
+                # pickle.dump(temp_goal,open('./debug_imgs/map_{:04d}.p'.format(self.step),'wb'))
                 temp_goal *= (torch.sum(self.local_map[4:10], dim=0) - self.local_map[cn]).cpu().numpy() == 0
-
+                if(self.args.mapping_strategy != 'neural'):
+                    # perform non maximum suppression:
+                    temp_goal = self.non_largest_suppression(temp_goal)
+                    pass
                 if temp_goal.sum() != 0.:
                     self.goal_map = temp_goal
                     self.found_goal = 1
                 else:
                     self.found_goal = 0
 
+    def non_largest_suppression(self,local):
+        local = (local*255).astype(np.uint8)
+        analysis = cv2.connectedComponentsWithStats(local,
+                                                4,
+                                                cv2.CV_32S)
+        (totalLabels, label_ids, values, centroid) = analysis
+        max_area = 0
+        max_blob = 0
+        max_blob_mask = np.zeros(local.shape)
+        refined_local = np.copy(local)
+
+        if(np.any(local)):
+            for label in range(totalLabels):
+                mask = label_ids == label
+                if(np.sum(local[mask]) > 0):
+                    area = values[label,cv2.CC_STAT_AREA]
+                    if(area > max_area):
+                        max_area = area
+                        max_blob = label
+                        max_blob_mask = mask
+            refined_local[np.logical_not(max_blob_mask)] = 0
+        return refined_local
 
     def inc_step(self):
         """Increase step counters."""
