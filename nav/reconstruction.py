@@ -1063,13 +1063,13 @@ class PeanutMapper():
                 # we first filter things within the robot's level
                 Z = -pcd_t[:,1]
                 # pdb.set_trace()
-                # pcd_max_height = Z < (-self.current_z - self.args.camera_height) + 2
-                # pcd_min_height = Z > (-self.current_z - self.args.camera_height) - 0.3
-                # height_mask = torch.logical_and(pcd_max_height,pcd_max_height)
-                # # pdb.set_trace()
-                # # height_mask = pcd_t[:,1] >-5
-                # pcd_t = pcd_t[height_mask]
-                # weights = weights[height_mask]
+                pcd_max_height = Z < (-self.current_z - self.args.camera_height) + 2.5
+                pcd_min_height = Z > (-self.current_z - self.args.camera_height) - 0.3
+                height_mask = torch.logical_and(pcd_max_height,pcd_max_height)
+                # pdb.set_trace()
+                # height_mask = pcd_t[:,1] >-5
+                pcd_t = pcd_t[height_mask]
+                weights = weights[height_mask]
                 pcd_t[:,0] = -pcd_t[:,0]
                 pcd_t[:,2] = pcd_t[:,2]
                 thold = 0.2
@@ -1077,7 +1077,7 @@ class PeanutMapper():
                 uncertain_thold = 0.3
                 obstacle_weight_threshold = 0
 
-                # labels = labels[height_mask]
+                labels = labels[height_mask]
                 thold_labels = (labels > thold).any(axis = 1)
                 hard_labels =labels.argmax(dim =1) + 4
                 top_labels = labels.max(dim = 1).values.float()
@@ -1160,7 +1160,7 @@ class PeanutMapper():
                 del ground_confidences
                 del ground_counts
                 del weights
-                # del height_mask
+                del height_mask
                 # del obstacle_obs
                 # del uncertain
                 # del vacant

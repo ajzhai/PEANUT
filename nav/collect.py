@@ -34,7 +34,7 @@ def main():
     print(config.DATASET.SPLIT, 'split')
     print(len(hab_env.episodes), 'episodes in dataset')
     
-    num_episodes = 500
+    num_episodes = 1000
     start = args.start_ep
     end = args.end_ep if args.end_ep > 0 else num_episodes
     
