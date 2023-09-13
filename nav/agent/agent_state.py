@@ -524,7 +524,7 @@ class Agent_State:
                         tmp_erosion = self.args.goal_erode
                     for erosion_rounds in range(tmp_erosion):
                         if(self.goal_cat in fewer_erosions_set):
-                            if(erosion_rounds > self.args.goal_erode-1):
+                            if(erosion_rounds > self.args.goal_erode-2):
                                 break
                         temp_goal = skimage.morphology.binary_erosion(temp_goal.astype(bool)).astype(float)
                     temp_goal = skimage.morphology.binary_dilation(temp_goal.astype(bool)).astype(float)
@@ -822,8 +822,8 @@ class Mixed_Agent_State(Agent_State):
         self.step = 0
 
         self.poses = torch.from_numpy(np.asarray(infos['sensor_pose'])).float().to(self.device)
-        tmp_obs = torch.clone(obs)
-        tmp_obs[4:,:,:] = 0
+        # tmp_obs = torch.clone(obs)
+        # tmp_obs[4:,:,:] = 0
         self.local_map[4:] = 0
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(tmp_obs, self.poses, self.local_map, self.local_pose,self)
@@ -876,12 +876,12 @@ class Mixed_Agent_State(Agent_State):
     def update_local_map(self, obs,unscaled_obs, infos,original_infos):
         args = self.args
         # pdb.set_trace()
-        tmp_obs = torch.clone(obs)
-        tmp_obs[4:,:,:] = 0
-        tmp_local_map = torch.clone(self.local_map)
-        tmp_local_map[4:,:,:] = 0
+        # tmp_obs = torch.clone(obs)
+        # tmp_obs[4:,:,:] = 0
+        # tmp_local_map = torch.clone(self.local_map)
+        # tmp_local_map[4:,:,:] = 0
         _, self.local_map, _, self.local_pose = \
-            self.sem_map_module(tmp_obs, self.poses, tmp_local_map, self.local_pose,self)
+            self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
         del tmp_obs
         del tmp_local_map
         temp_fm = self.trad_sem_map_module.update_and_get_map(unscaled_obs,original_infos,self.full_map)

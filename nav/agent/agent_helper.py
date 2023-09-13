@@ -431,14 +431,14 @@ class Agent_Helper:
         planner = FMMPlanner(traversible)
         
         selem = skimage.morphology.disk(8 if self.found_goal == 1 else 2)
-        # if(self.found_goal):
-        #     if(self.old_selem is None):
-        #         self.old_selem = self.selem
-        #         self.selem = skimage.morphology.disk(self.args.col_rad-1)
-        # else:
-        #     if(self.old_selem is not None):
-        #         self.selem = self.old_selem
-        #         self.old_selem = None
+        if(self.found_goal):
+            if(self.old_selem is None):
+                self.old_selem = self.selem
+                self.selem = skimage.morphology.disk(self.args.col_rad-1)
+        else:
+            if(self.old_selem is not None):
+                self.selem = self.old_selem
+                self.old_selem = None
 
         # Smalller radius for toilet
         is_toilet = self.info['goal_name'] == 'toilet'
