@@ -33,8 +33,6 @@ def get_args():
                         help='path to segmentation model')
     parser.add_argument('--segformer_ckpt', type=str, default='/workspaces/peanut-temp/nav/agent/utils/HM3D Finetuned SegFormer - ObjectGoalNav - sqrt weights - Shuffled - full finetune/checkpoint-62216',
             help='path to segformer segmentation model checkpoint')
-    parser.add_argument('--ESANet_ckpt', type=str, default='/workspaces/peanut-temp/nav/agent/utils/ESANET_model.ckpt',
-            help='path to segformer segmentation model checkpoint')
     parser.add_argument('--seg_type', type=str, default='Mask-RCNN',
         help='Which semantic segmentation model to use - valid choices are [Mask-RCNN,Segformer]')
     parser.add_argument('--fusion_type', type=str, default='Averaging',

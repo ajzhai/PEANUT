@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import math
 from agent.utils.fmm_planner import FMMPlanner
-from agent.utils.segmentation import SemanticPredMaskRCNN,SegformerSegmenter,SegformerHighPrecision,ESANetSegmenter
+from agent.utils.segmentation import SemanticPredMaskRCNN,SegformerSegmenter,SegformerHighPrecision
 from constants import color_palette
 import agent.utils.pose as pu
 import agent.utils.visualization as vu
@@ -73,12 +73,6 @@ class Agent_Helper:
                 self.seg_model = SegformerHighPrecision(args)
             else:
                 self.seg_model = SegformerSegmenter(args)
-        elif(args.seg_type == 'ESANet'):
-            print('\n\n\n\n ESANET!!! \n\n\n ')
-            if(self.args.mapping_strategy == 'neural'):
-                self.seg_model = ESANetHighPrecision(args)
-            else:
-                self.seg_model = ESANetSegmenter(args)
         
         # initializations for planning:
         self.selem = skimage.morphology.disk(args.col_rad)
@@ -437,14 +431,14 @@ class Agent_Helper:
         planner = FMMPlanner(traversible)
         
         selem = skimage.morphology.disk(8 if self.found_goal == 1 else 2)
-        # if(self.found_goal):
-        #     if(self.old_selem is None):
-        #         self.old_selem = self.selem
-        #         self.selem = skimage.morphology.disk(self.args.col_rad-1)
-        # else:
-        #     if(self.old_selem is not None):
-        #         self.selem = self.old_selem
-        #         self.old_selem = None
+        if(self.found_goal):
+            if(self.old_selem is None):
+                self.old_selem = self.selem
+                self.selem = skimage.morphology.disk(self.args.col_rad-1)
+        else:
+            if(self.old_selem is not None):
+                self.selem = self.old_selem
+                self.old_selem = None
 
         # Smalller radius for toilet
         is_toilet = self.info['goal_name'] == 'toilet'
