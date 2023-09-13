@@ -827,7 +827,6 @@ class Mixed_Agent_State(Agent_State):
         self.local_map[4:] = 0
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(tmp_obs, self.poses, self.local_map, self.local_pose,self)
-        del tmp_obs
         temp_fm = self.trad_sem_map_module.update_and_get_map(unscaled_obs,original_infos,self.full_map)
         semantic_lm = temp_fm[4:,
                             self.lmb[0]:self.lmb[1],
@@ -882,8 +881,6 @@ class Mixed_Agent_State(Agent_State):
         # tmp_local_map[4:,:,:] = 0
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
-        del tmp_obs
-        del tmp_local_map
         temp_fm = self.trad_sem_map_module.update_and_get_map(unscaled_obs,original_infos,self.full_map)
         semantic_lm = temp_fm[4:,
                             self.lmb[0]:self.lmb[1],
