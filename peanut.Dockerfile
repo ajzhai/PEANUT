@@ -19,6 +19,7 @@ RUN /bin/bash -c ". activate habitat; python -m pip install openmim; mim install
 RUN /bin/bash -c ". activate habitat; pip install gym==0.10.5 "
 ADD prediction /prediction
 RUN /bin/bash -c ". activate habitat; cd prediction; pip install -e ."
+RUN /bin/bash -c ". activate habitat; pip install open3d klampt transformers"
 
 ARG INCUBATOR_VER=unknown
 ADD nav_exp.sh /nav_exp.sh

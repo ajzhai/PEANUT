@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import math
 from agent.utils.fmm_planner import FMMPlanner
-from agent.utils.segmentation import SemanticPredMaskRCNN,SegformerSegmenter,SegformerHighPrecision
+from agent.utils.segmentation import SemanticPredMaskRCNN,SegformerSegmenter,SegformerHighPrecision,ESANetSegmenter
 from constants import color_palette
 import agent.utils.pose as pu
 import agent.utils.visualization as vu
@@ -65,12 +65,20 @@ class Agent_Helper:
 
         # initialize semantic segmentation prediction model
         if(args.seg_type == 'Mask-RCNN'):
+            print('MASK-RCNN')
             self.seg_model = SemanticPredMaskRCNN(args)
         elif(args.seg_type =='Segformer'):
+            print('Segformer!')
             if(self.args.mapping_strategy == 'neural'):
                 self.seg_model = SegformerHighPrecision(args)
             else:
                 self.seg_model = SegformerSegmenter(args)
+        elif(args.seg_type == 'ESANet'):
+            print('\n\n\n\n ESANET!!! \n\n\n ')
+            if(self.args.mapping_strategy == 'neural'):
+                self.seg_model = ESANetHighPrecision(args)
+            else:
+                self.seg_model = ESANetSegmenter(args)
         
         # initializations for planning:
         self.selem = skimage.morphology.disk(args.col_rad)

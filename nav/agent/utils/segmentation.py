@@ -7,7 +7,7 @@ import torch.utils.model_zoo as model_zoo
 import argparse
 import time
 import numpy as np
-
+import pickle
 from detectron2.config import get_cfg, LazyConfig, instantiate
 from detectron2.engine.defaults import create_ddp_model
 from detectron2.model_zoo import get_config
@@ -22,6 +22,10 @@ import detectron2.data.transforms as T
 from transformers import SegformerFeatureExtractor, SegformerForSemanticSegmentation
 from PIL import Image
 from constants import color_palette
+import sys
+import cv2
+
+
 
 def debug_tensor(label, tensor):
     print(label, tensor.size(), tensor.mean().item(), tensor.std().item())
@@ -74,6 +78,12 @@ def compress_sem_map(sem_map):
         c_map[sem_map[i] > 0.] = i + 1
     return c_map
 
+COLORS = np.array([
+    [148,103,188],[151,226,173],[174,198,232],[31,120,180],[255,188,120],[188,189,35],
+    [140,86,74],[255,152,151],[213,39,40],[0,0,0],[196,176,213],[196,156,148],
+    [23,190,208],[247,183,210],[218,219,141],[254,127,14],[227,119,194],
+    [158,218,229],[43,160,45],[112,128,144],[82,83,163]
+]).astype(np.uint8)
 
 class SegformerSegmenter():
     def __init__(self,args):
@@ -82,6 +92,7 @@ class SegformerSegmenter():
     def get_prediction(self, img, depth=None, goal_cat=None):
         args = self.args
         seg_out = self.segmenter.get_pred_probs(img)
+
         img = img[:,:,::-1]
         return seg_out,img
 
@@ -191,3 +202,204 @@ class FineTunedTSegmenter():
         probs[probs<thold] = 0
         probs[probs.sum(axis = 2) == 0][:,9] = 1
         return probs
+
+
+class ESANetClassifier:
+    def __init__(self,temperature = 1,NYU = False):
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        args = pickle.load(open('/workspaces/peanut-temp/nav/agent/utils/ESANet/args.p','rb'))
+        self.model, self.device = build_model_ESANet(args, n_classes=40)
+        args.ckpt_path = '/workspaces/peanut-temp/nav/agent/utils/ESANet/trained_models/nyuv2/r34_NBt1D_scenenet.pth'
+        args.depth_scaling = 0.1
+        checkpoint = torch.load(args.ckpt_path,
+                                map_location=lambda storage, loc: storage)
+        self.model.load_state_dict(checkpoint['state_dict'])
+        self.model.eval()
+        self.model.to(self.device)
+        self.dataset, self.preprocessor = prepare_data(args, with_input_orig=True)
+        self.class_mapping = np.array([ 1.,  2.,  3.,  4.,  5.,  6.,  7.,  8.,  9., 10., 11., 12.,
+        0., 13.,  0., 14.,  0.,  0.,  0.,  0.,  0.,  0.,  0., 15.,  0.,
+        0.,  0., 16.,  0.,  0.,  0.,  0., 17., 18.,  0., 19.,  0.,  0.,
+        20.,  0.]).astype(np.uint8)
+        class_matrix = np.zeros((40,21))
+        self.temperature = temperature
+
+        for idx,new_class in enumerate(self.class_mapping):
+            class_matrix[idx,new_class] = 1
+
+        self.cm = torch.from_numpy(class_matrix.astype(np.float32)).to(self.device)
+        self.NYU = NYU
+
+        self.pred_dist = np.zeros((480,640,21))
+        self.softmax = nn.Softmax(dim = 1)
+    def set_temperature(self,temperature):
+        self.temperature = temperature
+    def classify(self,img_rgb,depth,x = None,y = None,temperature = None):
+        with torch.no_grad():
+            # preprocess sample
+            sample = self.preprocessor({'image': img_rgb, 'depth': depth})
+
+            # add batch axis and copy to device
+            image = sample['image'][None].to(self.device)
+            depth = sample['depth'][None].to(self.device)
+
+            # apply network
+            pred = self.model(image, depth)
+
+            if(not self.NYU):
+                # Condense probabilities for unsupported classes
+                pred = torch.tensordot(pred.squeeze(),self.cm,dims = ([0],[0])).permute((2,0,1)).unsqueeze(0)
+
+            if((x is None) or (y is None)):
+                pred = F.interpolate(pred, (pred.shape[2],pred.shape[3]),mode='nearest')
+            else:
+                pred = F.interpolate(pred, (x,y),mode='nearest')
+
+            if(temperature is None):
+                pred = pred/self.temperature
+            else:
+                pred = pred/temperature
+
+            pred = torch.argmax(pred, dim=1)
+            pred = pred.cpu().numpy().squeeze().astype(np.uint8)
+            # if(not self.NYU):
+            #     pred = self.class_mapping[pred]
+        return pred
+    def get_pred_probs(self,img_rgb,depth,x = None,y = None,temperature = None):
+        with torch.no_grad():
+            # preprocess sample
+            sample = self.preprocessor({'image': img_rgb, 'depth': depth})
+
+            # add batch axis and copy to device
+            image = sample['image'][None].to(self.device)
+            depth = sample['depth'][None].to(self.device)
+            pred = self.model(image, depth)
+
+            if(not self.NYU):
+                # Condense probabilities for unsupported classes
+                pred = torch.tensordot(pred.squeeze(),self.cm,dims = ([0],[0])).permute((2,0,1)).unsqueeze(0)
+
+
+
+            # print(pred.shape)
+            if((x is None) or (y is None)):
+                pred = F.interpolate(pred, (pred.shape[2],pred.shape[3]),mode='nearest')
+            else:
+                pred = F.interpolate(pred, (x,y),mode='nearest')
+
+            if(temperature):
+                # apply network
+                # print('applying temperature scaling')
+                pred = self.softmax(pred/temperature)
+            else:
+                pred = self.softmax(pred/self.temperature)
+
+            # pred = torch.tensordot(pred.cpu(),self.cm,dims = ([0],[0]))
+            # pred = pred.cpu().squeeze().permute(1,2,0).detach().numpy()
+            # self.pred_dist[:,:,:] = 0
+            # for idx,new_class in enumerate(self.class_mapping):
+            #     self.pred_dist[:,:,new_class] += pred[:,:,idx]
+        return pred.squeeze().detach().permute((1,2,0)).contiguous().cpu().numpy()
+
+    def get_logits(self,img_rgb,depth,x = None,y = None,temperature = None):
+        with torch.no_grad():
+            sample = self.preprocessor({'image': img_rgb, 'depth': depth})
+
+            # add batch axis and copy to device
+            image = sample['image'][None].to(self.device)
+            depth = sample['depth'][None].to(self.device)
+            # print(pred.shape)
+            pred = self.model(image, depth)
+            if((x is None) or (y is None)):
+                pred = F.interpolate(pred, (pred.shape[2],pred.shape[3]),mode='nearest')
+            else:
+                pred = F.interpolate(pred, (x,y),mode='nearest')
+
+            if(not self.NYU):
+                pred = torch.tensordot(pred.squeeze(),self.cm,dims = ([0],[0])).permute((2,0,1)).unsqueeze(0)
+            
+            if(temperature is None):
+                pred = pred/self.temperature
+            else:
+                pred = pred/temperature
+
+            if((x is None) or (y is None)):
+                pred = F.interpolate(pred, (pred.shape[2],pred.shape[3]),mode='nearest')
+            else:
+                pred = F.interpolate(pred, (x,y),mode='nearest')
+            # pred = pred.cpu().squeeze().permute(1,2,0).detach().numpy()
+            # self.pred_dist[:,:,:] = 0
+            # for idx,new_class in enumerate(self.class_mapping):
+            #     self.pred_dist[:,:,new_class] += pred[:,:,idx]
+        return pred.detach().cpu().numpy().squeeze()
+
+    def get_logits_and_preds(self,img_rgb,depth,x = None,y = None,temperature = None):
+        with torch.no_grad():
+            sample = self.preprocessor({'image': img_rgb, 'depth': depth})
+
+            # add batch axis and copy to device
+            image = sample['image'][None].to(self.device)
+            depth = sample['depth'][None].to(self.device)
+            # print(pred.shape)
+            pred = self.model(image, depth)
+            if((x is None) or (y is None)):
+                pred = F.interpolate(pred, (pred.shape[2],pred.shape[3]),mode='nearest')
+            else:
+                pred = F.interpolate(pred, (x,y),mode='nearest')
+
+            if(not self.NYU):
+                pred = torch.tensordot(pred.squeeze(),self.cm,dims = ([0],[0])).permute((2,0,1)).unsqueeze(0)
+
+            if(temperature is None):
+                pred = pred/self.temperature
+            else:
+                pred = pred/temperature
+
+
+            if((x is None) or (y is None)):
+                pred = F.interpolate(pred, (pred.shape[2],pred.shape[3]),mode='nearest')
+            else:
+                pred = F.interpolate(pred, (x,y),mode='nearest')
+
+            pred_classes = torch.argmax(pred, dim=1).detach().squeeze().cpu().numpy()
+        # pred = pred.cpu().squeeze().permute(1,2,0).detach().numpy()
+        # self.pred_dist[:,:,:] = 0
+        # for idx,new_class in enumerate(self.class_mapping):
+        #     self.pred_dist[:,:,new_class] += pred[:,:,idx]
+        return pred.detach().cpu().numpy().squeeze(),pred_classes
+
+class FineTunedESANet(ESANetClassifier):
+    def __init__(self,temperature = 1,checkpoint = './artifacts/Try2:v79'):
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        super().__init__(temperature = temperature,NYU = True)
+
+        self.model.eval()
+        for param in self.model.parameters():
+            param.requires_grad = False
+        # decoder_head = model.decode_head
+        self.model.decoder.conv_out = nn.Conv2d(
+            128, 10, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        self.model.decoder.conv_out.requires_grad = False
+        self.model.decoder.upsample1 = Upsample(mode='nearest', channels=10)
+        self.model.decoder.upsample2 = Upsample(mode='nearest', channels=10)
+        self.checkpoint = checkpoint
+        self.temperature = temperature
+        state_dict = self.get_clean_state_dict()
+        new_state_dict = self.get_clean_state_dict()
+        self.model.load_state_dict(new_state_dict)
+        for param in self.model.parameters():
+            param.requires_grad = False
+        self.model.to(self.device)
+    
+    def set_temperature(self,temperature):
+        self.temperature = temperature
+
+    def get_clean_state_dict(self):
+        params_dict = torch.load(self.checkpoint)
+        state = params_dict['state_dict']
+        new_state_dict = OrderedDict()
+        for param in state.keys():
+            prefix,new_param = param.split('.',1)
+            if(prefix != 'criterion'):
+                new_state_dict.update({new_param:state[param]})
+        return new_state_dict
