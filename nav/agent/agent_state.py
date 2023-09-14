@@ -822,10 +822,11 @@ class Mixed_Agent_State(Agent_State):
         self.step = 0
 
         self.poses = torch.from_numpy(np.asarray(infos['sensor_pose'])).float().to(self.device)
+        # tmp_obs = torch.clone(obs)
+        # tmp_obs[4:,:,:] = 0
         self.local_map[4:] = 0
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
-        
         temp_fm = self.trad_sem_map_module.update_and_get_map(unscaled_obs,original_infos,self.full_map)
         semantic_lm = temp_fm[4:,
                             self.lmb[0]:self.lmb[1],
@@ -874,9 +875,12 @@ class Mixed_Agent_State(Agent_State):
     def update_local_map(self, obs,unscaled_obs, infos,original_infos):
         args = self.args
         # pdb.set_trace()
+        # tmp_obs = torch.clone(obs)
+        # tmp_obs[4:,:,:] = 0
+        # tmp_local_map = torch.clone(self.local_map)
+        # tmp_local_map[4:,:,:] = 0
         _, self.local_map, _, self.local_pose = \
             self.sem_map_module(obs, self.poses, self.local_map, self.local_pose,self)
-
         temp_fm = self.trad_sem_map_module.update_and_get_map(unscaled_obs,original_infos,self.full_map)
         semantic_lm = temp_fm[4:,
                             self.lmb[0]:self.lmb[1],
