@@ -908,7 +908,7 @@ class LearnedGeneralizedIntegration(GeneralizedIntegration):
         return o3c.Tensor(selected_weights).to(self.device).reshape((-1,1)).to(o3c.float32)[mask_inlier]
 
 class PeanutMapper():
-    def __init__(self,args,n_classes = 10,voxel_size = 0.025,device =  o3d.core.Device('CUDA:0'),intrinsic = None,cuda_device = None,depth_scale = 1.0):
+    def __init__(self,args,n_classes = 10,voxel_size = 0.025,device =  o3d.core.Device('CUDA:0'),intrinsic = None,cuda_device = None,depth_scale = 1.0,weight_threshold = 0.4):
         self.rec_type = args.fusion_type
         self.device = device
         self.voxel_size = voxel_size
@@ -916,7 +916,7 @@ class PeanutMapper():
         self.intrinsic = intrinsic
         self.args = args
         self.verified = False
-        self.weight_threshold = 0.4
+        self.weight_threshold = weight_threshold
         self.res = 8
         self.integrate_color = True
         self.starting_pose = None
