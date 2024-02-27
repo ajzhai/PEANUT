@@ -978,12 +978,17 @@ class PeanutMapper():
         debug_collect = False
         # print('dumping images')
         if(debug_collect):
-            print('saving data for debugging!')
-            pickle.dump(depth,open('./debug_imgs/depth_{:4d}.p'.format(self.total_frames),'wb'))
-            pickle.dump(rgb,open('./debug_imgs/rgb_{:4d}.p'.format(self.total_frames),'wb'))
-            pickle.dump(pose,open('./debug_imgs/pose_{:4d}.p'.format(self.total_frames),'wb'))
-            pickle.dump(self.intrinsics,open('./debug_imgs/intrinsics.p'.format(self.total_frames),'wb'))
-            self.total_frames += 1
+            if(self.total_frames > 3):
+                print('saving data for debugging!')
+                pickle.dump(depth,open('./debug_imgs2/depth_{:04d}.p'.format(self.total_frames),'wb'))
+                pickle.dump(rgb,open('./debug_imgs2/rgb_{:04d}.p'.format(self.total_frames),'wb'))
+                pickle.dump(pose,open('./debug_imgs2/pose_{:04d}.p'.format(self.total_frames),'wb'))
+                pickle.dump(self.intrinsics,open('./debug_imgs2/intrinsics.p'.format(self.total_frames),'wb'))
+                pcd,labels,weights = self.rec.extract_point_cloud(return_raw_logits = False)
+                o3d.io.write_point_cloud('./debug_imgs2/pcd_{:04d}.pcd'.format(self.total_frames), pcd, write_ascii=False, compressed=True, print_progress=False)
+                pickle.dump(labels,open('./debug_imgs2/labels_{:04d}.p'.format(self.total_frames),'wb'))
+                pickle.dump(weights,open('./debug_imgs2/weights_{:04d}.p'.format(self.total_frames),'wb'))
+
         # if()
         #filtering dogshit frames
         if((depth>self.args.max_depth).sum()/depth.flatten().shape < 0.98):

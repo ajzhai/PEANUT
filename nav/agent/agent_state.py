@@ -586,7 +586,7 @@ class Traditional_Agent_State(Agent_State):
         self.old_z = self.args.camera_height
         # Semantic Mapping
     def init_vgb(self):
-        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.025,device =self.o3d_device,
+        self.sem_map_module = PeanutMapper(self.args,voxel_size = 0.04,device =self.o3d_device,
         cuda_device = self.args.device,weight_threshold = 5)
         # self.sem_map_module.eval()
 
